@@ -1,0 +1,13 @@
+[ req ]
+default_bits = 2048
+default_keyfile = privkey.pem
+distinguished_name = req_distinguished_name
+prompt = no
+
+[ req_distinguished_name ]
+countryName = RU
+localityName = Locality Name (eg, city)
+organizationName = Organization Name(eg, org)
+organizationalUnitName = Organizational Unit Name (eg, section)
+commonName = Common Name (eg, YOUR name)
+emailAddress = Email Address

@@ -2,19 +2,19 @@ cmake_minimum_required(VERSION 2.6)
 project(fnet)
 
 set(FNET_HEADERS
-    src/socket.h
+    src/module.h
     src/ip_address.h
     src/transport.h
 )
 
 set(FNET_SOURCES
     src/transport.c
+    src/module.c
 )
 
 if (WIN32)
     set(FNET_SOURCES
         ${FNET_SOURCES}
-        src/os/windows/socket.c
     )
 endif (WIN32)
 

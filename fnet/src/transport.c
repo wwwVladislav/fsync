@@ -1,5 +1,4 @@
 #include "transport.h"
-#include "socket.h"
 #include <futils/log.h>
 
 struct fnet_client
@@ -27,12 +26,7 @@ fnet_client_t *fnet_connect(fnet_address_t const *addr)
         return 0;
     }
 
-    pclient->sock = fnet_sock_connect(addr);
-    if (pclient->sock == -1)
-    {
-        free(pclient);
-        pclient = 0;
-    }
+    // TODO
 
     return pclient;
 }
@@ -44,6 +38,8 @@ void fnet_disconnect(fnet_client_t *pclient)
         FS_ERR("Invalid argument");
         return;
     }
-    fnet_sock_disconnect(pclient->sock);
+
+    // TODO
+
     free(pclient);
 }

@@ -1,6 +1,6 @@
 [ req ]
 default_bits = 2048
-default_keyfile = privkey.pem
+default_keyfile = keyfile.pem
 distinguished_name = req_distinguished_name
 prompt = no
 

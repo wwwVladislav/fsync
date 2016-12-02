@@ -2,14 +2,14 @@ cmake_minimum_required(VERSION 2.6)
 project(fnet)
 
 set(FNET_HEADERS
-    src/module.h
+    src/config.h
     src/ip_address.h
     src/transport.h
 )
 
 set(FNET_SOURCES
+    src/config.c
     src/transport.c
-    src/module.c
 )
 
 if (WIN32)

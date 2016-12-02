@@ -1,5 +1,6 @@
 #include <fsync/fsutils.h>
 #include <fsync/device.h>
+#include <fnet/transport.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -49,8 +50,25 @@ void test_dev()
     fsdev_hotplug_unregister_callback(h);
 }
 
+void test_transport()
+{
+    fnet_server_t *pserver = fnet_bind(2345);
+    if (pserver)
+    {
+        fnet_client_t *pclient = fnet_accept(pserver);
+        fnet_unbind(pserver);
+    }
+
+    fnet_client_t *pclient = fnet_connect("127.0.0.1:2345");
+    if (pclient)
+    {
+        fnet_disconnect(pclient);
+    }
+}
+
 int main()
 {
+    test_transport();
     test_fsiterator();
     test_dev();
 

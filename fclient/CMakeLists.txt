@@ -8,7 +8,10 @@ set(FCLIENT_SOURCES
     src/main.c
 )
 
-include_directories(../fsync/include)
+include_directories(
+    ../fsync/include
+    ../fnet/include
+)
 
 add_executable(fclient ${FCLIENT_HEADERS} ${FCLIENT_SOURCES})
 add_dependencies(fclient fsync fnet)

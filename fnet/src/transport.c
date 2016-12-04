@@ -50,12 +50,21 @@ static bool fnet_ssl_module_init(fnet_ssl_module_t *pmodule)
 
         do
         {
-            pmodule->ctx = SSL_CTX_new(SSLv23_method());
+            SSL_METHOD const *method = SSLv23_method();
+            if (!method)
+            {
+                FS_ERR("Unable to retrieve the SSL methods. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));
+                break;
+            }
+
+            pmodule->ctx = SSL_CTX_new(method);
             if (!pmodule->ctx)
             {
                 FS_ERR("Unable to create the SSL context. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));
                 break;
             }
+
+            SSL_CTX_set_options(pmodule->ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_COMPRESSION);
 
             if (!SSL_CTX_load_verify_locations(pmodule->ctx, 0, FNET_TRUSTED_CERTS_DIR))
             {
@@ -186,8 +195,14 @@ void fnet_disconnect(fnet_client_t *pclient)
     else FS_ERR("Invalid argument");
 }
 
-fnet_server_t *fnet_bind(short port)
+fnet_server_t *fnet_bind(char const *addr, fnet_accepter_t accepter)
 {
+    if (!addr)
+    {
+        FS_ERR("Invalid address");
+        return 0;
+    }
+
     fnet_server_t *pserver = malloc(sizeof(fnet_server_t));
     if (!pserver)
     {
@@ -230,9 +245,7 @@ fnet_server_t *fnet_bind(short port)
 
     pserver->bio = BIO_push(pserver->buffering_bio, pserver->bio);
 
-    char sport[8];
-    snprintf(sport, sizeof sport, "%u", port);
-    pserver->accept_bio = BIO_new_accept(sport);
+    pserver->accept_bio = BIO_new_accept(addr);
     if (!pserver->accept_bio)
     {
         FS_ERR("The SSL BIO isn't created. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));

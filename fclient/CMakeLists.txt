@@ -14,5 +14,5 @@ include_directories(
 )
 
 add_executable(fclient ${FCLIENT_HEADERS} ${FCLIENT_SOURCES})
-add_dependencies(fclient fsync fnet)
-target_link_libraries(fclient fsync fnet)
+add_dependencies(fclient fsync fiface)
+target_link_libraries(fclient fsync fiface)

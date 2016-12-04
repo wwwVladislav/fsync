@@ -48,21 +48,31 @@ void test_dev()
     fsdev_handle_t h = fsdev_hotplug_register_callback(FSDEV_VOLUME, dev_hotplug_callback);
     sleep(10);
     fsdev_hotplug_unregister_callback(h);
+
+    fsdev_volume_t volumes[64];
+    unsigned size = fsdev_get_all_volumes(volumes, 64);
+    for(unsigned i = 0; i < size; ++i)
+        printf("%s\n", volumes[i].name);
+}
+
+static void clients_accepter(fnet_client_t *pclient)
+{
 }
 
 void test_transport()
 {
-    fnet_server_t *pserver = fnet_bind(2345);
+    fnet_server_t *pserver = fnet_bind("127.0.0.1:12345", clients_accepter);
     if (pserver)
     {
-        fnet_client_t *pclient = fnet_accept(pserver);
-        fnet_unbind(pserver);
-    }
+        sleep(10);
 
-    fnet_client_t *pclient = fnet_connect("127.0.0.1:2345");
-    if (pclient)
-    {
-        fnet_disconnect(pclient);
+        fnet_client_t *pclient = fnet_connect("127.0.0.1:12345");
+        if (pclient)
+        {
+            fnet_disconnect(pclient);
+        }
+
+        fnet_unbind(pserver);
     }
 }
 
@@ -71,10 +81,5 @@ int main()
     test_transport();
     test_fsiterator();
     test_dev();
-
-    fsdev_volume_t volumes[64];
-    unsigned size = fsdev_get_all_volumes(volumes, 64);
-    for(unsigned i = 0; i < size; ++i)
-        printf("%s\n", volumes[i].name);
     return 0;
 }

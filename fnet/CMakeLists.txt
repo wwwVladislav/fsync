@@ -41,6 +41,6 @@ endif (WIN32)
 
 use_c99()
 
-add_library(fnet SHARED ${FNET_HEADERS} ${FNET_SOURCES})
+add_library(fnet STATIC ${FNET_HEADERS} ${FNET_SOURCES})
 add_dependencies(fnet futils)
 target_link_libraries(fnet ${FNET_LIBS})

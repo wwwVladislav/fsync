@@ -2,13 +2,13 @@
 import sys, os, getopt
 
 def usage():
-    print 'Usage:\n\tcreate_cert.py [--root] [--node]'
+    print('Usage:\n\tcreate_cert.py [--root] [--node]')
 
 def main(argv):
     try:
         opts, args = getopt.getopt(argv, "hrn", ["help", "root", "node"])
     except getopt.GetoptError as err:
-        print str(err)
+        print(str(err))
         usage()
         sys.exit(2)
 

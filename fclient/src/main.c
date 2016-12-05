@@ -64,12 +64,14 @@ void test_transport()
     fnet_server_t *pserver = fnet_bind("127.0.0.1:12345", clients_accepter);
     if (pserver)
     {
-        sleep(10);
-
-        fnet_client_t *pclient = fnet_connect("127.0.0.1:12345");
-        if (pclient)
+        for(int i = 0; i < 2; ++ i)
         {
-            fnet_disconnect(pclient);
+            fnet_client_t *pclient = fnet_connect("127.0.0.1:12345");
+            if (pclient)
+            {
+                sleep(10);
+                fnet_disconnect(pclient);
+            }
         }
 
         fnet_unbind(pserver);

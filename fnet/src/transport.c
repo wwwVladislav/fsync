@@ -6,6 +6,8 @@
 #include <openssl/err.h>
 #include <stdbool.h>
 #include <string.h>
+#include <pthread.h>
+#include <time.h>
 
 struct fnet_client
 {
@@ -15,10 +17,11 @@ struct fnet_client
 
 struct fnet_server
 {
-    SSL *ssl;
-    BIO *bio;
-    BIO *buffering_bio;
-    BIO *accept_bio;
+    volatile bool   is_active;
+    SSL            *ssl;
+    BIO            *bio;
+    BIO            *accept_bio;
+    pthread_t       thread;
 };
 
 typedef struct
@@ -44,8 +47,10 @@ static bool fnet_ssl_module_init(fnet_ssl_module_t *pmodule)
     {
         SSL_load_error_strings();
         ERR_load_BIO_strings();
+        ERR_load_SSL_strings();
         OpenSSL_add_all_algorithms();
         SSL_library_init();
+
         bool ret = false;
 
         do
@@ -65,6 +70,7 @@ static bool fnet_ssl_module_init(fnet_ssl_module_t *pmodule)
             }
 
             SSL_CTX_set_options(pmodule->ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_COMPRESSION);
+            SSL_CTX_set_default_passwd_cb(pmodule->ctx, fnet_pem_password_cb);
 
             if (!SSL_CTX_load_verify_locations(pmodule->ctx, 0, FNET_TRUSTED_CERTS_DIR))
             {
@@ -77,8 +83,6 @@ static bool fnet_ssl_module_init(fnet_ssl_module_t *pmodule)
                 FS_ERR("Error loading SSL certificate. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));
                 break;
             }
-
-            SSL_CTX_set_default_passwd_cb(pmodule->ctx, fnet_pem_password_cb);
 
             if (!SSL_CTX_use_PrivateKey_file(pmodule->ctx, FNET_PRIVATE_KEY_FILE, SSL_FILETYPE_PEM)
                 || !SSL_CTX_check_private_key(pmodule->ctx))
@@ -195,6 +199,33 @@ void fnet_disconnect(fnet_client_t *pclient)
     else FS_ERR("Invalid argument");
 }
 
+static void *fnet_server_accept_thread(void *param)
+{
+    fnet_server_t *pserver = (fnet_server_t *)param;
+    pserver->is_active = true;
+
+    while(pserver->is_active)
+    {
+        // accept BIO
+        if(BIO_do_accept(pserver->accept_bio) <= 0)
+        {
+            FS_ERR("Error in connection accept. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));
+            continue;
+        }
+
+        BIO *cli_bio = BIO_pop(pserver->accept_bio);
+
+        if(BIO_do_handshake(cli_bio) <= 0)
+        {
+            FS_ERR("Error in SSL handshake. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));
+            BIO_free_all(cli_bio);
+            continue;
+        }
+    }
+
+    return 0;
+}
+
 fnet_server_t *fnet_bind(char const *addr, fnet_accepter_t accepter)
 {
     if (!addr)
@@ -235,16 +266,6 @@ fnet_server_t *fnet_bind(char const *addr, fnet_accepter_t accepter)
 
     SSL_set_mode(pserver->ssl, SSL_MODE_AUTO_RETRY);
 
-    pserver->buffering_bio = BIO_new(BIO_f_buffer());
-    if (!pserver->buffering_bio)
-    {
-        FS_ERR("The SSL buffering BIO isn't created. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));
-        fnet_unbind(pserver);
-        return 0;
-    }
-
-    pserver->bio = BIO_push(pserver->buffering_bio, pserver->bio);
-
     pserver->accept_bio = BIO_new_accept(addr);
     if (!pserver->accept_bio)
     {
@@ -253,12 +274,34 @@ fnet_server_t *fnet_bind(char const *addr, fnet_accepter_t accepter)
         return 0;
     }
 
+    BIO_set_bind_mode(pserver->accept_bio, BIO_BIND_REUSEADDR);
+
     if (!BIO_set_accept_bios(pserver->accept_bio, pserver->bio))
     {
         FS_ERR("Unable to accept the BIO. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));
         fnet_unbind(pserver);
         return 0;
     }
+
+    // Setup accept BIO
+    if(BIO_do_accept(pserver->accept_bio) <= 0)
+    {
+        FS_ERR("Error setting up accept BIO. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));
+        fnet_unbind(pserver);
+        return 0;
+    }
+
+    int rc = pthread_create(&pserver->thread, 0, fnet_server_accept_thread, (void*)pserver);
+    if (rc)
+    {
+        FS_ERR("Unable to create the thread to accept the client connections. Error: %d", rc);
+        fnet_unbind(pserver);
+        return 0;
+    }
+
+    static struct timespec const ts = { 1, 0 };
+    while(!pserver->is_active)
+        nanosleep(&ts, NULL);
 
     return pserver;
 }
@@ -267,42 +310,12 @@ void fnet_unbind(fnet_server_t *pserver)
 {
     if (pserver)
     {
-        BIO_free_all(pserver->bio);
+        pserver->is_active = false;
+        // TODO
+        BIO_free_all(pserver->accept_bio);
+        pthread_join(pserver->thread, 0);
         fnet_ssl_module_uninit(&fnet_ssl_module);
         free(pserver);
     }
     else FS_ERR("Invalid argument");
-}
-
-fnet_client_t *fnet_accept(fnet_server_t *pserver)
-{
-    if (!pserver)
-    {
-        FS_ERR("Invalid argument");
-        return 0;
-    }
-
-    // Setup accept BIO
-    if(BIO_do_accept(pserver->accept_bio) <= 0)
-    {
-        FS_ERR("Error setting up accept BIO. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));
-        return 0;
-    }
-
-    // accept BIO
-    if(BIO_do_accept(pserver->accept_bio) <= 0)
-    {
-        FS_ERR("Error in connection accept. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));
-        return 0;
-    }
-
-    BIO *cli_bio = BIO_pop(pserver->accept_bio);
-    if(BIO_do_handshake(pserver->bio) <= 0)
-    {
-        FS_ERR("Error in SSL handshake. Error: \'%s\'", ERR_reason_error_string(ERR_get_error()));
-        return 0;
-    }
-
-    // TODO
-    return 0;
 }

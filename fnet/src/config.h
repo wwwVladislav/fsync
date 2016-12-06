@@ -5,5 +5,6 @@ extern char const *FNET_TRUSTED_CERTS_DIR;
 extern char const *FNET_CERTIFICATE_FILE;
 extern char const *FNET_PRIVATE_KEY_FILE;
 extern char const *FNET_DEFAULT_PASSWORD;
+extern unsigned    FNET_SOCK_MAX_CONNECTIONS;
 
 #endif

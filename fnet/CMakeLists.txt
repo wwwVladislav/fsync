@@ -5,16 +5,23 @@ set(FNET_HEADERS
     src/config.h
     src/ip_address.h
     src/transport.h
+    src/tcp_transport.h
+    src/ssl_transport.h
+    src/socket.h
 )
 
 set(FNET_SOURCES
     src/config.c
+    src/ip_address.c
     src/transport.c
+    src/tcp_transport.c
+    src/ssl_transport.c
 )
 
 if (WIN32)
     set(FNET_SOURCES
         ${FNET_SOURCES}
+        src/os/windows/socket.c
     )
 endif (WIN32)
 

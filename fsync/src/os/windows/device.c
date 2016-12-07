@@ -1,8 +1,10 @@
 #include "../../device.h"
 #include <futils/log.h>
 
-#define WIN32_LEAN_AND_MEAN
-#define _WIN32_WINNT   0x0501
+#ifndef _WIN32_WINNT
+#   define WIN32_LEAN_AND_MEAN
+#   define _WIN32_WINNT   0x0501
+#endif
 #include <windows.h>
 #include <dbt.h>
 

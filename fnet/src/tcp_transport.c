@@ -18,6 +18,7 @@ struct fnet_tcp_server
     fnet_socket_t       sock;
     pthread_t           thread;
     fnet_tcp_accepter_t accepter;
+    void               *user_data;
 };
 
 typedef struct
@@ -26,6 +27,11 @@ typedef struct
 } fnet_tcp_module_t;
 
 static fnet_tcp_module_t fnet_tcp_module = { 0 };
+
+fnet_socket_t fnet_tcp_client_socket(fnet_tcp_client_t const *pclient)
+{
+    return pclient->sock;
+}
 
 static bool fnet_tcp_module_init(fnet_tcp_module_t *pmodule)
 {
@@ -124,7 +130,7 @@ static void *fnet_tcp_server_accept_thread(void *param)
                     memset(pclient, 0, sizeof *pclient);
                     pclient->sock = sock;
                     pclient->addr = addr;
-                    pserver->accepter(pclient);
+                    pserver->accepter(pserver, pclient);
                 }
                 else
                 {
@@ -158,7 +164,7 @@ fnet_tcp_server_t *fnet_tcp_bind(char const *addr, fnet_tcp_accepter_t accepter)
 
     if (!fnet_tcp_module_init(&fnet_tcp_module))
     {
-        fnet_tcp_unbind(pserver);
+        free(pserver);
         return 0;
     }
 
@@ -203,4 +209,14 @@ void fnet_tcp_unbind(fnet_tcp_server_t *pserver)
         free(pserver);
     }
     else FS_ERR("Invalid argument");
+}
+
+void fnet_tcp_server_set_userdata(fnet_tcp_server_t *pserver, void *pdata)
+{
+    pserver->user_data = pdata;
+}
+
+void *fnet_tcp_server_get_userdata(fnet_tcp_server_t const *pserver)
+{
+    return pserver->user_data;
 }

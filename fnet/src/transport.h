@@ -1,6 +1,5 @@
 #ifndef TRANSPORT_H_FNET
 #define TRANSPORT_H_FNET
-#include "ssl_transport.h"
 
 typedef struct fnet_client fnet_client_t;
 typedef struct fnet_server fnet_server_t;

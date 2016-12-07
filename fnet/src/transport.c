@@ -86,14 +86,40 @@ void fnet_disconnect(fnet_client_t *pclient)
 
 static void fnet_tcp_accepter(fnet_tcp_server_t const *tcp_server, fnet_tcp_client_t *tcp_client)
 {
-    fnet_server_t *pserver = (fnet_server_t*)fnet_tcp_server_get_userdata(tcp_server);
-    // TODO
+    fnet_client_t *pclient = malloc(sizeof(fnet_client_t));
+    if (!pclient)
+    {
+        FS_ERR("Unable to allocate memory for client");
+        fnet_tcp_disconnect(tcp_client);
+    }
+    else
+    {
+        memset(pclient, 0, sizeof *pclient);
+        pclient->pimpl = tcp_client;
+        pclient->disconnect = (fnet_disconnect_t)fnet_tcp_disconnect;
+
+        fnet_server_t *pserver = (fnet_server_t*)fnet_tcp_server_get_userdata(tcp_server);
+        pserver->accepter(pserver, pclient);
+    }
 }
 
 static void fnet_ssl_accepter(fnet_ssl_server_t const *ssl_server, fnet_ssl_client_t *ssl_client)
 {
-    fnet_server_t *pserver = (fnet_server_t*)fnet_ssl_server_get_userdata(ssl_server);
-    // TODO
+    fnet_client_t *pclient = malloc(sizeof(fnet_client_t));
+    if (!pclient)
+    {
+        FS_ERR("Unable to allocate memory for client");
+        fnet_ssl_disconnect(ssl_client);
+    }
+    else
+    {
+        memset(pclient, 0, sizeof *pclient);
+        pclient->pimpl = ssl_client;
+        pclient->disconnect = (fnet_disconnect_t)fnet_ssl_disconnect;
+
+        fnet_server_t *pserver = (fnet_server_t*)fnet_ssl_server_get_userdata(ssl_server);
+        pserver->accepter(pserver, pclient);
+    }
 }
 
 fnet_server_t *fnet_bind(fnet_transport_t transport, char const *addr, fnet_accepter_t accepter)
@@ -142,7 +168,7 @@ fnet_server_t *fnet_bind(fnet_transport_t transport, char const *addr, fnet_acce
 
             fnet_ssl_server_set_userdata(pserver->pimpl, pserver);
 
-            pserver->unbind       = (fnet_unbind_t)fnet_ssl_unbind;
+            pserver->unbind = (fnet_unbind_t)fnet_ssl_unbind;
             break;
         }
 

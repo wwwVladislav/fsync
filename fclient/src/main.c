@@ -55,27 +55,27 @@ void test_dev()
         printf("%s\n", volumes[i].name);
 }
 
-static void clients_accepter(fnet_ssl_server_t const *pserver, fnet_ssl_client_t *pclient)
+static void clients_accepter(fnet_server_t const *pserver, fnet_client_t *pclient)
 {
-    fnet_ssl_disconnect(pclient);
+    fnet_disconnect(pclient);
 }
 
 void test_transport()
 {
-    fnet_ssl_server_t *pserver = fnet_ssl_bind("127.0.0.1:12345", clients_accepter);
+    fnet_server_t *pserver = fnet_bind(FNET_SSL, "127.0.0.1:12345", clients_accepter);
     if (pserver)
     {
         for(int i = 0; i < 2; ++ i)
         {
-            fnet_ssl_client_t *pclient = fnet_ssl_connect("127.0.0.1:12345");
+            fnet_client_t *pclient = fnet_connect(FNET_SSL, "127.0.0.1:12345");
             if (pclient)
             {
                 sleep(1);
-                fnet_ssl_disconnect(pclient);
+                fnet_disconnect(pclient);
             }
         }
 
-        fnet_ssl_unbind(pserver);
+        fnet_unbind(pserver);
     }
 }
 

@@ -19,6 +19,7 @@ struct fnet_server
     fnet_accepter_t   accepter;
     void             *pimpl;
     fnet_unbind_t     unbind;
+    void             *user_data;
 };
 
 fnet_client_t *fnet_connect(fnet_transport_t transport, char const *addr)
@@ -192,4 +193,14 @@ void fnet_unbind(fnet_server_t *pserver)
         free(pserver);
     }
     else FS_ERR("Invalid argument");
+}
+
+void fnet_server_set_userdata(fnet_server_t *pserver, void *pdata)
+{
+    pserver->user_data = pdata;
+}
+
+void *fnet_server_get_userdata(fnet_server_t const *pserver)
+{
+    return pserver->user_data;
 }

@@ -96,10 +96,7 @@ fnet_socket_t fnet_socket_accept(fnet_socket_t sock, fnet_address_t *addr)
     int addr_len = sizeof(fnet_address_t);
     SOCKET client_sock = accept((SOCKET)sock, (struct sockaddr *)addr, addr ? &addr_len : 0);
     if (client_sock == INVALID_SOCKET)
-    {
-        FS_ERR("Unable to accept the socket");
         return FNET_INVALID_SOCKET;
-    }
     return (fnet_socket_t)client_sock;
 }
 

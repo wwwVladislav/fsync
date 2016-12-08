@@ -61,6 +61,7 @@ fnet_client_t *fnet_connect(fnet_transport_t transport, char const *addr)
                 return 0;
             }
             pclient->disconnect = (fnet_disconnect_t)fnet_ssl_disconnect;
+            break;
         }
 
         default:

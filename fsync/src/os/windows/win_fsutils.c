@@ -32,12 +32,13 @@ typedef struct fsdir_dir_info
 
 struct fsdir_listener
 {
+    volatile bool       is_active;
     HANDLE              iocp;
     pthread_t           thread;
-    volatile bool       is_active;
     fsdir_dir_info_t    dirs[FSDIR_MAX_LISTEN_DIRS];
     pthread_mutex_t     handlers_mutex;
     fsdir_evt_handler_t handlers[FSDIR_MAX_HANDLERS];
+    void*               args[FSDIR_MAX_HANDLERS];
 };
 
 #define fsdir_push_lock(mutex)                      \
@@ -123,7 +124,7 @@ static void *fsdir_listener_thread(void *param)
                     for (unsigned i = 0; i < FSDIR_MAX_HANDLERS; ++i)
                     {
                         if (listener->handlers[i])
-                            listener->handlers[i](action, dir->path);
+                            listener->handlers[i](action, dir->path, listener->args[i]);
                     }
                     fsdir_pop_lock();
 
@@ -292,7 +293,7 @@ bool fsdir_listener_add_path(fsdir_listener_t *listener, char const *path)
     return false;
 }
 
-bool fsdir_listener_reg_handler(fsdir_listener_t *listener, fsdir_evt_handler_t handler)
+bool fsdir_listener_reg_handler(fsdir_listener_t *listener, fsdir_evt_handler_t handler, void *arg)
 {
     if (!listener) return false;
     bool ret = false;
@@ -303,6 +304,7 @@ bool fsdir_listener_reg_handler(fsdir_listener_t *listener, fsdir_evt_handler_t 
         if (!listener->handlers[i])
         {
             listener->handlers[i] = handler;
+            listener->args[i] = arg;
             ret = true;
             break;
         }

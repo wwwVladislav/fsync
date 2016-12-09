@@ -1,10 +1,11 @@
 #include <fsync/fsutils.h>
 #include <fsync/device.h>
+#include <fsync/sync.h>
 #include <fnet/transport.h>
 #include <stdio.h>
 #include <unistd.h>
 
-void dir_evt_handler(fsdir_action_t evt, char const *path)
+void dir_evt_handler(fsdir_action_t evt, char const *path, void * arg)
 {
     printf("[%d] %s\n", evt, path);
 }
@@ -28,7 +29,7 @@ void test_fsiterator()
     fsdir_listener_t *listener = fsdir_listener_create();
     if (listener)
     {
-        bool ret = fsdir_listener_reg_handler(listener, dir_evt_handler);
+        bool ret = fsdir_listener_reg_handler(listener, dir_evt_handler, 0);
         (void)ret;
         ret = fsdir_listener_add_path(listener, "C:\\Temp");
         ret = fsdir_listener_add_path(listener, "D:\\Dev\\");

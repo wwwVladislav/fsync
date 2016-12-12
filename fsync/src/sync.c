@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <time.h>
+#include <string.h>
 
 static size_t const FSYNC_INBUF_SIZE  = 32 * 1024;
 static size_t const FSYNC_SIGBUF_SIZE = 16 * 1024;
@@ -36,7 +37,14 @@ static void *fsync_thread(void *param)
     fsync_t *psync = (fsync_t*)param;
     psync->is_active = true;
 
+    while(psync->is_active)
+    {
+        static struct timespec const ts = { 1, 0 };
+        while(!psync->is_active)
+            nanosleep(&ts, NULL);
+    }
     // TODO
+    return 0;
 }
 
 fsync_t *fsync_create(char const *dir)
@@ -74,6 +82,18 @@ fsync_t *fsync_create(char const *dir)
         return 0;
     }
 
+    int rc = pthread_create(&psync->thread, 0, fsync_thread, (void*)psync);
+    if (rc)
+    {
+        FS_ERR("Unable to create the thread for directories synchronization. Error: %d", rc);
+        fsync_free(psync);
+        return 0;
+    }
+
+    static struct timespec const ts = { 1, 0 };
+    while(!psync->is_active)
+        nanosleep(&ts, NULL);
+
     return psync;
 }
 
@@ -81,6 +101,8 @@ void fsync_free(fsync_t *psync)
 {
     if (psync)
     {
+        psync->is_active = false;
+        pthread_join(psync->thread, 0);
         fsdir_listener_free(psync->dir_listener);
         free(psync);
     }

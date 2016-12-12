@@ -3,10 +3,12 @@ project(futils)
 
 set(FUTILS_HEADERS
     src/log.h
+    src/queue.h
 )
 
 set(FUTILS_SOURCES
     src/log.c
+    src/queue.c
 )
 
 use_c99()

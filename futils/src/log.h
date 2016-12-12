@@ -1,5 +1,5 @@
-#ifndef LOG_H_FSYNC
-#define LOG_H_FSYNC
+#ifndef LOG_H_FUTILS
+#define LOG_H_FUTILS
 
 typedef enum fslog_level
 {

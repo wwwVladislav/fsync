@@ -11,8 +11,9 @@ set(FCLIENT_SOURCES
 include_directories(
     ../fsync/include
     ../fnet/include
+    ../futils/include
 )
 
 add_executable(fclient ${FCLIENT_HEADERS} ${FCLIENT_SOURCES})
-add_dependencies(fclient fsync fiface)
-target_link_libraries(fclient fsync fiface)
+add_dependencies(fclient fsync fiface futils)
+target_link_libraries(fclient fsync fiface futils)

@@ -80,8 +80,18 @@ void test_transport()
     }
 }
 
+void test_fsync()
+{
+    fsync_t *sync = fsync_create("C:\\Temp");
+    if(sync)
+    {
+        fsync_free(sync);
+    }
+}
+
 int main()
 {
+    test_fsync();
     test_transport();
     test_fsiterator();
     test_dev();

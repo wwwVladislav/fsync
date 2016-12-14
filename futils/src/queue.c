@@ -13,36 +13,31 @@ typedef enum
 struct fring_queue
 {
     volatile fring_status_t status;
-    fring_queue_notify_t    notify;
-    unsigned                capacity;
-    volatile unsigned       start;
-    volatile unsigned       end;
-    char                    buf[1];
+    uint32_t                capacity;
+    volatile uint32_t       start;
+    volatile uint32_t       end;
+    uint8_t                 buf[1];
 };
 
-fring_queue_t *fring_queue_create(char *buf, unsigned size, fring_queue_notify_t fn)
+ferr_t fring_queue_create(void *buf, uint32_t size, fring_queue_t **ppqueue)
 {
-    if (!buf || !fn)
+    if (!buf
+        || size < sizeof(fring_queue_t)
+        || !ppqueue)
     {
         FS_ERR("Invalid arguments");
-        return 0;
-    }
-
-    if (size < sizeof(fring_queue_t))
-    {
-        FS_ERR("The queue buffer size is too small");
-        return 0;
+        return FINVALID_ARG;
     }
 
     fring_queue_t *pqueue = (fring_queue_t*)buf;
     pqueue->status = FRING_QUEUE_UNINITIALIZED;
-    pqueue->notify = fn;
 
     pqueue->capacity = size - offsetof(fring_queue_t, buf);
     pqueue->start = 0;
     pqueue->end = 0;
     pqueue->status = FRING_QUEUE_INITIALIZED;
-    return pqueue;
+    *ppqueue = pqueue;
+    return FSUCCESS;
 }
 
 void fring_queue_free(fring_queue_t *pqueue)
@@ -51,12 +46,12 @@ void fring_queue_free(fring_queue_t *pqueue)
         pqueue->status = FRING_QUEUE_DESTROYED;
 }
 
-bool fring_queue_push_back(fring_queue_t *pqueue, char const *data, unsigned size)
+ferr_t fring_queue_push_back(fring_queue_t *pqueue, void const *data, uint32_t size)
 {
     if (!pqueue || pqueue->status != FRING_QUEUE_INITIALIZED)
     {
         FS_ERR("Invalid queue");
-        return false;
+        return FINVALID_ARG;
     }
 
     unsigned const data_size = sizeof(unsigned) + size;
@@ -68,8 +63,7 @@ bool fring_queue_push_back(fring_queue_t *pqueue, char const *data, unsigned siz
             memcpy(pqueue->buf + pqueue->end, &size, sizeof size);
             memcpy(pqueue->buf + pqueue->end + sizeof size, data, size);
             pqueue->end += data_size;
-            pqueue->notify();
-            return true;
+            return FSUCCESS;
         }
         else if (sizeof size <= pqueue->capacity - pqueue->end
                  && size < pqueue->start)
@@ -77,21 +71,19 @@ bool fring_queue_push_back(fring_queue_t *pqueue, char const *data, unsigned siz
             memcpy(pqueue->buf + pqueue->end, &size, sizeof size);
             memcpy(pqueue->buf, data, size);
             pqueue->end = size;
-            pqueue->notify();
-            return true;
+            return FSUCCESS;
         }
         else if (data_size < pqueue->start)
         {
             memcpy(pqueue->buf, &size, sizeof size);
             memcpy(pqueue->buf + sizeof size, data, size);
             pqueue->end = data_size;
-            pqueue->notify();
-            return true;
+            return FSUCCESS;
         }
         else
         {
             FS_WARN("There is no free space.");
-            return false;
+            return FNO_MEM;
         }
     }
     else
@@ -101,37 +93,36 @@ bool fring_queue_push_back(fring_queue_t *pqueue, char const *data, unsigned siz
             memcpy(pqueue->buf + pqueue->end, &size, sizeof size);
             memcpy(pqueue->buf + pqueue->end + sizeof size, data, size);
             pqueue->end += data_size;
-            pqueue->notify();
-            return true;
+            return FSUCCESS;
         }
         else
         {
             FS_WARN("There is no free space.");
-            return false;
+            return FNO_MEM;
         }
     }
 
-    return true;
+    return FSUCCESS;
 }
 
-bool fring_queue_front(fring_queue_t *pqueue, char **pdata, unsigned *psize)
+ferr_t fring_queue_front(fring_queue_t *pqueue, void **pdata, uint32_t *psize)
 {
     if (!pqueue || pqueue->status != FRING_QUEUE_INITIALIZED)
     {
         FS_ERR("Invalid queue");
-        return false;
+        return FINVALID_ARG;
     }
 
     if (!pdata || !psize)
     {
         FS_ERR("Invalid arguments");
-        return false;
+        return FINVALID_ARG;
     }
 
     if (pqueue->end == pqueue->start)
     {
         *psize = 0u;
-        return true;    // No data
+        return FFAIL;    // No data
     }
 
     if (sizeof *psize <= pqueue->capacity - pqueue->start)
@@ -148,21 +139,21 @@ bool fring_queue_front(fring_queue_t *pqueue, char **pdata, unsigned *psize)
         *pdata = pqueue->buf + sizeof *psize;
     }
 
-    return true;
+    return FSUCCESS;
 }
 
-bool fring_queue_pop_front(fring_queue_t *pqueue)
+ferr_t fring_queue_pop_front(fring_queue_t *pqueue)
 {
     if (!pqueue || pqueue->status != FRING_QUEUE_INITIALIZED)
     {
         FS_ERR("Invalid queue");
-        return false;
+        return FINVALID_ARG;
     }
 
     if (pqueue->end == pqueue->start)
     {
         FS_WARN("Queue is empty.");
-        return false;
+        return FFAIL;
     }
 
     unsigned size;
@@ -181,5 +172,5 @@ bool fring_queue_pop_front(fring_queue_t *pqueue)
         pqueue->start = size + sizeof size;
     }
 
-    return true;
+    return FSUCCESS;
 }

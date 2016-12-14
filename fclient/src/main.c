@@ -5,9 +5,9 @@
 #include <stdio.h>
 #include <unistd.h>
 
-void dir_evt_handler(fsdir_action_t evt, char const *path, void * arg)
+void dir_evt_handler(fsdir_event_t const *event, void * arg)
 {
-    printf("[%d] %s\n", evt, path);
+    printf("[%d] %s\n", event->action, event->path);
 }
 
 void test_fsiterator()
@@ -85,6 +85,7 @@ void test_fsync()
     fsync_t *sync = fsync_create("C:\\Temp");
     if(sync)
     {
+        sleep(600);
         fsync_free(sync);
     }
 }

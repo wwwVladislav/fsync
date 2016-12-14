@@ -1,0 +1,1 @@
+#include "../../src/static_allocator.h"

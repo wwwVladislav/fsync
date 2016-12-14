@@ -22,12 +22,12 @@ enum FSDIR_CONFIG
 
 typedef struct fsdir_dir_info
 {
-    HANDLE     dir;
-    DWORD      data_size;
-    char       data[8196];
-    OVERLAPPED overlapped;
-    size_t     path_len;
-    char       path[FSMAX_PATH + 1];
+    HANDLE          dir;
+    DWORD           data_size;
+    char            data[8196];
+    OVERLAPPED      overlapped;
+    size_t          path_len;
+    fsdir_event_t   event;
 } fsdir_dir_info_t;
 
 struct fsdir_listener
@@ -71,17 +71,42 @@ static size_t fsdir_set_path(fsdir_dir_info_t *dir, char const *path, size_t pat
 {
     char delimeter = '\\';
     char const *s = path;
-    for(char *d = dir->path; *s; ++s, ++d)
+    unsigned short i = 0;
+    for(char *d = dir->event.path; i < path_len; ++s, ++d, ++i)
     {
         *d = *s;
         if (*s == '/')
             delimeter = '/';
     }
-    if (dir->path[path_len - 1] != delimeter)
-        dir->path[path_len++] = delimeter;
-    dir->path[path_len] = 0;
+    if (dir->event.path[path_len - 1] != delimeter)
+        dir->event.path[path_len++] = delimeter;
+    dir->event.path[path_len] = 0;
     dir->path_len = path_len;
     return path_len;
+}
+
+static bool open_directory_and_listen(HANDLE iocp, fsdir_dir_info_t *dir)
+{
+    dir->dir = CreateFileA(dir->event.path,
+                           FILE_LIST_DIRECTORY | GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           0,
+                           OPEN_EXISTING,
+                           FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, 0);
+    if (dir->dir == INVALID_HANDLE_VALUE)
+    {
+        FS_ERR("Unable to open directory \'%s\'. Error: %d", dir->event.path, GetLastError());
+        return false;
+    }
+
+    if (0 == CreateIoCompletionPort(dir->dir, iocp, (ULONG_PTR)dir, 0))
+    {
+        FS_ERR("Unable to create the IO completion port for directory \'%s\'. Error: %d", dir->event.path, GetLastError());
+        CloseHandle(dir->dir);
+        dir->dir = INVALID_HANDLE_VALUE;
+        return false;
+    }
+    return true;
 }
 
 static void *fsdir_listener_thread(void *param)
@@ -101,40 +126,67 @@ static void *fsdir_listener_thread(void *param)
                                       &pov,
                                       INFINITE))
         {
-            if (!completion_key || !number_of_bytes) continue;
-
+            if (!completion_key) continue;
             fsdir_dir_info_t *dir = (fsdir_dir_info_t*)completion_key;
-            DWORD offset = 0;
-            FILE_NOTIFY_INFORMATION *event;
 
-            char *path = dir->path + dir->path_len;
-            size_t size = sizeof dir->path - dir->path_len;
-
-            if (size)
+            if (number_of_bytes)
             {
-                do
+                DWORD offset = 0;
+                FILE_NOTIFY_INFORMATION *event;
+
+                char *path = dir->event.path + dir->path_len;
+                size_t size = sizeof dir->event.path - dir->path_len;
+
+                if (size)
                 {
-                    event = (FILE_NOTIFY_INFORMATION *)(dir->data + offset);
-
-                    int len = WideCharToMultiByte(CP_UTF8, 0, event->FileName, event->FileNameLength / sizeof(WCHAR), path, size - 1, 0, 0);
-                    path[len] = 0;
-                    fsdir_action_t action = fsdir_event_convert(event->Action);
-
-                    fsdir_push_lock(listener->handlers_mutex);
-                    for (unsigned i = 0; i < FSDIR_MAX_HANDLERS; ++i)
+                    do
                     {
-                        if (listener->handlers[i])
-                            listener->handlers[i](action, dir->path, listener->args[i]);
-                    }
-                    fsdir_pop_lock();
+                        event = (FILE_NOTIFY_INFORMATION *)(dir->data + offset);
 
-                    offset += event->NextEntryOffset;
+                        int len = WideCharToMultiByte(CP_UTF8, 0, event->FileName, event->FileNameLength / sizeof(WCHAR), path, size - 1, 0, 0);
+                        path[len] = 0;
+                        dir->event.action = fsdir_event_convert(event->Action);
+
+                        fsdir_push_lock(listener->handlers_mutex);
+                        for (unsigned i = 0; i < FSDIR_MAX_HANDLERS; ++i)
+                        {
+                            if (listener->handlers[i])
+                                listener->handlers[i](&dir->event, listener->args[i]);
+                        }
+                        fsdir_pop_lock();
+
+                        offset += event->NextEntryOffset;
+                    }
+                    while(event->NextEntryOffset);
                 }
-                while(event->NextEntryOffset);
+                else
+                {
+                    FS_ERR("No empty space for the path. The path is too long.");
+                }
             }
             else
             {
-                FS_ERR("No empty space for the path. The path is too long.");
+                // Directory was closed
+                dir->event.path[dir->path_len] = 0;
+                FS_ERR("Directory \'%s\'was closed", dir->event.path);
+
+                CancelIo(dir->dir);
+                CloseHandle(dir->dir);
+                dir->dir = INVALID_HANDLE_VALUE;
+
+                if (!open_directory_and_listen(listener->iocp, dir))
+                    continue;
+
+                // Directory was reopened. We should notify about it.
+                dir->event.action = FSDIR_ACTION_REOPENED;
+
+                fsdir_push_lock(listener->handlers_mutex);
+                for (unsigned i = 0; i < FSDIR_MAX_HANDLERS; ++i)
+                {
+                    if (listener->handlers[i])
+                        listener->handlers[i](&dir->event, listener->args[i]);
+                }
+                fsdir_pop_lock();
             }
 
             memset(dir->data, 0, sizeof dir->data);
@@ -248,25 +300,8 @@ bool fsdir_listener_add_path(fsdir_listener_t *listener, char const *path)
             memset(dir, 0, sizeof *dir);
             fsdir_set_path(dir, path, path_len);
 
-            dir->dir = CreateFileA(dir->path,
-                                   FILE_LIST_DIRECTORY | GENERIC_READ,
-                                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                   0,
-                                   OPEN_EXISTING,
-                                   FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, 0);
-            if (dir->dir == INVALID_HANDLE_VALUE)
-            {
-                FS_ERR("Unable to open directory \'%s\'. Error: %d", path, GetLastError());
+            if (!open_directory_and_listen(listener->iocp, dir))
                 return false;
-            }
-
-            if (0 == CreateIoCompletionPort(dir->dir, listener->iocp, (ULONG_PTR)dir, 0))
-            {
-                FS_ERR("Unable to create the IO completion port for directory \'%s\'. Error: %d", path, GetLastError());
-                CloseHandle(dir->dir);
-                dir->dir = INVALID_HANDLE_VALUE;
-                return false;
-            }
 
             if (!ReadDirectoryChangesW(dir->dir,
                                        dir->data,

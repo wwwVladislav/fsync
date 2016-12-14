@@ -30,14 +30,21 @@ typedef struct
 
 typedef enum fsdir_action
 {
-    FSDIR_ACTION_ADDED = 0,
-    FSDIR_ACTION_REMOVED,
-    FSDIR_ACTION_MODIFIED,
-    FSDIR_ACTION_RENAMED,
-    FSDIR_ACTION_UNKNOWN
+    FSDIR_ACTION_ADDED      = 1 << 0,
+    FSDIR_ACTION_REMOVED    = 1 << 1,
+    FSDIR_ACTION_MODIFIED   = 1 << 2,
+    FSDIR_ACTION_RENAMED    = 1 << 3,
+    FSDIR_ACTION_REOPENED   = 1 << 4,
+    FSDIR_ACTION_UNKNOWN    = 1 << 5
 } fsdir_action_t;
 
-typedef void (*fsdir_evt_handler_t)(fsdir_action_t, char const *, void *);
+typedef struct
+{
+    fsdir_action_t  action;
+    char            path[FSMAX_PATH + 1];
+} fsdir_event_t;
+
+typedef void (*fsdir_evt_handler_t)(fsdir_event_t const *, void *);
 
 fsdir_t          *fsdir_open(char const *);
 void              fsdir_close(fsdir_t *);

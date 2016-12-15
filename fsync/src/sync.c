@@ -3,7 +3,7 @@
 #include "config.h"
 #include <futils/log.h>
 #include <futils/queue.h>
-#include <futils/prefix_tree.h>
+#include <futils/static_allocator.h>
 #define RSYNC_NO_STDIO_INTERFACE
 #include <librsync.h>
 #include <stdlib.h>
@@ -18,20 +18,32 @@ enum
 {
     FSYNC_INBUF_SIZE        = 32 * 1024,
     FSYNC_SIGBUF_SIZE       = 16 * 1024,
-    FSYNC_FILES_TREE_SIZE   = 256,
+    FSYNC_FILES_LIST_SIZE   = 512,
     FSYNC_QUEUEBUF_SIZE     = 256 * 1024
 };
 
+typedef struct
+{
+    char    path[FSMAX_PATH + 1];
+    time_t  modification_time;
+} fchanged_file_t;
+
 struct fsync
 {
-    volatile bool     is_active;
-    char              tree_buf[FPTREE_MEM_NEED(FSYNC_FILES_TREE_SIZE, FSMAX_PATH)]; // buffer for files tree
-    char              queue_buf[FSYNC_QUEUEBUF_SIZE];                               // buffer for file events queue
-    fptree_t         *files_tree;                                                   // files tree
-    fring_queue_t    *events_queue;                                                 // events queue
-    sem_t             events_sem;                                                   // semaphore for events waiting
-    pthread_t         thread;
-    fsdir_listener_t *dir_listener;
+    volatile bool       is_active;
+
+    sem_t               events_sem;                                                                         // semaphore for events waiting
+    fring_queue_t       *events_queue;                                                                      // events queue
+    char                queue_buf[FSYNC_QUEUEBUF_SIZE];                                                     // buffer for file events queue
+
+    char                fla_buf[FSTATIC_ALLOCATOR_MEM_NEED(FSYNC_FILES_LIST_SIZE, sizeof(fchanged_file_t))];// buffer for files list allocator
+    fstatic_allocator_t *files_list_allocator;                                                              // files list allocator
+    fchanged_file_t     *files_list[FSYNC_FILES_LIST_SIZE];                                                 // TODO: use prefix tree
+    size_t              files_list_size;                                                                    // files list size
+
+    pthread_t           thread;
+    fsdir_listener_t    *dir_listener;
+    time_t              sync_time;
 };
 
 #define fsync_push_lock(mutex)                      \
@@ -42,17 +54,18 @@ struct fsync
 
 #define fsync_pop_lock() pthread_cleanup_pop(1);
 
-/*
 static int fsdir_compare(const void *pa, const void *pb)
 {
+    fchanged_file_t const *lhs = *(fchanged_file_t const **)pa;
+    fchanged_file_t const *rhs = *(fchanged_file_t const **)pb;
+
 #   ifdef _WIN32
-    // TODO: windows
-    return 0;
+    // TODO: for windows paths must be compared in lower case
+    return strncmp(lhs->path, rhs->path, sizeof rhs->path);
 #   else
-    return strcmp((const char *)pa, (const char *)pb);
+    return strncmp(lhs->path, rhs->path, sizeof rhs->path);
 #   endif
 }
-*/
 
 static void fsdir_evt_handler(fsdir_event_t const *event, void *arg)
 {
@@ -63,6 +76,28 @@ static void fsdir_evt_handler(fsdir_event_t const *event, void *arg)
         FS_WARN("Unable to push the file system event into the queue");
 }
 
+static void fsync_add_file2list(fsync_t *psync, fchanged_file_t const *file)
+{
+    fchanged_file_t *changed_file = (fchanged_file_t *)fstatic_alloc(psync->files_list_allocator);
+
+    if (changed_file)
+    {
+        memcpy(changed_file, file, sizeof *file);
+        psync->files_list[psync->files_list_size++] = changed_file;
+        qsort(psync->files_list, psync->files_list_size, sizeof(fchanged_file_t*), fsdir_compare);
+    }
+    else
+        FS_WARN("Unable to allocate memory for changed file name");
+}
+
+static void fsync_remove_file_from_list(fsync_t *psync, size_t idx)
+{
+    fstatic_free(psync->files_list_allocator, psync->files_list[idx]);
+    for(++idx; idx < psync->files_list_size; ++idx)
+        psync->files_list[idx - 1] = psync->files_list[idx];
+    psync->files_list[psync->files_list_size--] = 0;
+}
+
 static void *fsync_thread(void *param)
 {
     fsync_t *psync = (fsync_t*)param;
@@ -70,68 +105,53 @@ static void *fsync_thread(void *param)
 
     while(psync->is_active)
     {
-        struct timespec tm = { time(0) + FSYNC_TIMEOUT, 0 };
+        struct timespec tm = { time(0) + FSYNC_TIMEOUT / 2, 0 };
         while (sem_timedwait(&psync->events_sem, &tm) == -1 && errno == EINTR)
             continue;       // Restart if interrupted by handler
 
         if (!psync->is_active)
             break;
 
+        time_t const cur_time = time(0);
         fsdir_event_t *event = 0;
         uint32_t event_size = 0;
+
+        // Copy data from queue into the list
         if (fring_queue_front(psync->events_queue, (void **)&event, &event_size) == FSUCCESS)
         {
-            time_t const cur_time = time(0);
-            uint32_t const path_len = (uint32_t)strlen(event->path);
-            ferr_t const err = fptree_node_insert(psync->files_tree, (uint8_t const *)event->path, path_len, (void *)cur_time, 0);
-            if (err != FSUCCESS)
-                FS_WARN("Unable to push the file name into the files tree. Error: %d", err);
+            fchanged_file_t file;
+            strncpy(file.path, event->path, sizeof file.path);
+            file.modification_time = cur_time;
+            fchanged_file_t const *pfile = &file;
 
-            printf("[%d] %s\n", event->action, event->path);
+            fchanged_file_t *changed_file = bsearch(&pfile, psync->files_list, psync->files_list_size, sizeof(fchanged_file_t*), fsdir_compare);
+            if (!changed_file)
+                fsync_add_file2list(psync, pfile);
+            else
+                changed_file->modification_time = cur_time;
 
             if (fring_queue_pop_front(psync->events_queue) != FSUCCESS)
                 FS_WARN("Unable to pop the file system event from the queue");
         }
 
-/*
-        bool is_empty;
-
-        fsync_push_lock(psync->files_tree_mutex);
-        is_empty = fptree_empty(psync->files_tree);
-        fsync_pop_lock();
-
-        if (!is_empty)
+        // Sync changed files in tree
+        if (cur_time - psync->sync_time >= FSYNC_TIMEOUT / 2)
         {
-            static struct timespec const ts = { 1, 0 };
-            nanosleep(&ts, NULL);
-        }
-        else
-        {
-            printf("Empty!\n");
-            continue;
-        }
-
-        fsync_push_lock(psync->files_tree_mutex);
-
-        fptree_iterator_t *it;
-        if (fptree_iterator_create(psync->files_tree, &it) == FSUCCESS)
-        {
-            fptree_node_t node;
-            for(ferr_t err = fptree_first(it, &node);
-                err == FSUCCESS;
-                err = fptree_next(it, &node))
+            for(size_t i = 0; i < psync->files_list_size;)
             {
-                if (node.data)
-                    printf("[%d] %s\n", *(uint32_t*)&node.data, node.key);
-            }
-            fptree_iterator_delete(it);
-        }
-        else
-            FS_WARN("Unable to create the files tree iteartor");
-        fptree_clear(psync->files_tree);
+                time_t const modification_time = psync->files_list[i]->modification_time;
 
-        fsync_pop_lock();
-*/
+                if (cur_time - modification_time >= FSYNC_TIMEOUT)
+                {
+                    FS_INFO("Sync: [%d] %s", modification_time, psync->files_list[i]->path);
+                    fsync_remove_file_from_list(psync, i);
+                }
+                else
+                    ++i;
+            }
+
+            psync->sync_time = cur_time;
+        }
     }
 
     return 0;
@@ -153,9 +173,9 @@ fsync_t *fsync_create(char const *dir)
     }
     memset(psync, 0, sizeof *psync);
 
-    if (fptree_create(psync->tree_buf, sizeof psync->tree_buf, FSMAX_PATH, &psync->files_tree) != FSUCCESS)
+    if (fstatic_allocator_create(psync->fla_buf, sizeof psync->fla_buf, sizeof(fsdir_event_t), &psync->files_list_allocator) != FSUCCESS)
     {
-        FS_ERR("The prefix tree for file paths isn't created");
+        FS_ERR("The allocator for file paths isn't created");
         free(psync);
         return 0;
     }
@@ -220,7 +240,7 @@ void fsync_free(fsync_t *psync)
         }
         fsdir_listener_free(psync->dir_listener);
         fring_queue_free(psync->events_queue);
-        fptree_delete(psync->files_tree);
+        fstatic_allocator_delete(psync->files_list_allocator);
         sem_destroy(&psync->events_sem);
         free(psync);
     }

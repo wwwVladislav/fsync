@@ -20,9 +20,9 @@ enum fstatic_allocator_params
 
 #define FSTATIC_ALLOCATOR_MEM_NEED(items, item_size) (FSTATIC_ALLOCATOR_HEADER_SIZE + items * sizeof(uint32_t) + items * item_size)
 
-ferr_t fstatic_allocator_create(void *buf, uint32_t size, uint32_t item_size, fstatic_allocator_t **);
+ferr_t   fstatic_allocator_create(void *buf, uint32_t size, uint32_t item_size, fstatic_allocator_t **);
 void     fstatic_allocator_delete(fstatic_allocator_t *);
-ferr_t fstatic_allocator_clear(fstatic_allocator_t *);
+ferr_t   fstatic_allocator_clear(fstatic_allocator_t *);
 void *   fstatic_alloc(fstatic_allocator_t *);
 void     fstatic_free(fstatic_allocator_t *, void *);
 uint32_t fstatic_allocator_available(fstatic_allocator_t const *);

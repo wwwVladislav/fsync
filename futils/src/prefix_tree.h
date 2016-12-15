@@ -40,10 +40,11 @@ ferr_t fptree_node_delete(fptree_t *ptr, uint8_t const *key, uint32_t key_len);
 ferr_t fptree_node_find(fptree_t *ptr, uint8_t const *key, uint32_t key_len, void **pdata);
 bool   fptree_empty(fptree_t *ptr);
 
-ferr_t fptree_iterator_create(fptree_t *ptr, fptree_iterator_t **);
-void   fptree_iterator_delete(fptree_iterator_t *);
-ferr_t fptree_first(fptree_iterator_t *, fptree_node_t *);
-ferr_t fptree_next(fptree_iterator_t *, fptree_node_t *);
+ferr_t fptree_iterator_create(fptree_t *ptr, fptree_iterator_t **); // create the tree iterator
+void   fptree_iterator_delete(fptree_iterator_t *);                 // delete the iterator
+ferr_t fptree_iterator_node_delete(fptree_iterator_t *);            // delete the node by iterator
+ferr_t fptree_first(fptree_iterator_t *, fptree_node_t *);          // return the first node
+ferr_t fptree_next(fptree_iterator_t *, fptree_node_t *);           // return the next node
 
 #ifdef __cplusplus
 }

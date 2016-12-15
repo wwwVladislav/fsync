@@ -41,7 +41,7 @@ typedef enum fptree_iterator_type
 struct fptree_iterator
 {
     fptree_iterator_type_t type;
-    fptree_leaf_t         *root;
+    fptree_t              *tree;
     uint32_t               size;
     uint32_t               top;
     fptree_leaf_t         *ptree_stack[1];
@@ -152,6 +152,16 @@ static void fptree_add_sibling(fptree_leaf_t *pleaf, fptree_leaf_t *sibling, uin
     sibling->key_len = key_len;
     memcpy(sibling->key, key, key_len);
     pleaf->sibling = sibling;
+}
+
+static fptree_leaf_t *fptree_find_prev_sibling(fptree_leaf_t *root, fptree_leaf_t *p)
+{
+    if (p->root)
+        root = p->root;
+    for(fptree_leaf_t *l = root->child; l; l = l->sibling)
+        if (p == l->sibling)
+            return l;
+    return 0;
 }
 
 ferr_t fptree_create(void *buf, uint32_t size, uint32_t key_len, fptree_t **pptree)
@@ -402,7 +412,7 @@ ferr_t fptree_iterator_create(fptree_t *ptr, fptree_iterator_t **iter)
     it = malloc(sizeof(fptree_iterator_t) + sizeof(fptree_leaf_t*) * fstatic_allocator_allocated(ptr->sallocator));
     if (!it) return FNO_MEM;
     it->type = FPTREE_CHILDS_ITERATOR;
-    it->root = ptr->root;
+    it->tree = ptr;
     it->size = fstatic_allocator_allocated(ptr->sallocator);
     it->top = 0;
     *iter = it;
@@ -430,12 +440,12 @@ ferr_t fptree_first(fptree_iterator_t *iter, fptree_node_t *node)
 {
     if (!iter || !node)
         return FINVALID_ARG;
-    if (!iter->root)
+    if (!iter->tree->root)
         return FFAIL;
 
     if (iter->type == FPTREE_CHILDS_ITERATOR)
     {
-        iter->ptree_stack[0] = iter->root;
+        iter->ptree_stack[0] = iter->tree->root;
         iter->top = 1;
     }
     else
@@ -453,7 +463,7 @@ ferr_t fptree_next(fptree_iterator_t *iter, fptree_node_t *node)
         return FINVALID_ARG;
     if (!iter->top)
         return FFAIL;
-    if (!iter->root)
+    if (!iter->tree->root)
         return FFAIL;
 
     if (iter->type == FPTREE_CHILDS_ITERATOR)
@@ -487,5 +497,66 @@ ferr_t fptree_next(fptree_iterator_t *iter, fptree_node_t *node)
 
     fptree_get_node(iter, node);
 
+    return FSUCCESS;
+}
+
+ferr_t fptree_iterator_node_delete(fptree_iterator_t *iter)
+{
+    if (!iter)
+        return FINVALID_ARG;
+    if (!iter->top)
+        return FFAIL;
+    if (!iter->tree->root)
+        return FFAIL;
+
+    fptree_leaf_t *p = iter->ptree_stack[iter->top - 1];
+    fptree_leaf_t *prev_sibling = fptree_find_prev_sibling(iter->tree->root, p);
+
+    p->data = 0;
+
+    if (!p->child)
+    {
+        if (prev_sibling)                       // has prev sibling
+        {
+            prev_sibling->sibling = p->sibling; // delete node from siblings list
+            memset(p, 0, sizeof *p);
+            fstatic_free(iter->tree->sallocator, p);
+            p = prev_sibling->root;
+        }
+        else if (p->root)                       // has root
+        {
+            fptree_leaf_t *root = p->root;
+            root->child = p->sibling;           // delete node from siblings list
+            memset(p, 0, sizeof *p);
+            fstatic_free(iter->tree->sallocator, p);
+            p = root;
+        }
+        else
+        {
+            assert(p == iter->tree->root);      // deleted root node
+            if (p != iter->tree->root)
+                return FFAIL;
+            iter->tree->root = iter->tree->root->sibling;
+            memset(p, 0, sizeof *p);
+            fstatic_free(iter->tree->sallocator, p);
+            p = 0;
+        }
+        iter->top--;
+    }
+
+    // TODO
+/*
+    while(p)
+    {
+        fptree_leaf_t *del_node = fptree_join_child(p);
+        if (del_node)
+        {
+            memset(del_node, 0, sizeof *del_node);
+            fstatic_free(ptr->sallocator, del_node);
+            p = p->root;
+        }
+        else p = 0;
+    }
+*/
     return FSUCCESS;
 }

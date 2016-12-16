@@ -220,3 +220,25 @@ void *fnet_tcp_server_get_userdata(fnet_tcp_server_t const *pserver)
 {
     return pserver->user_data;
 }
+
+fnet_tcp_wait_handler_t fnet_tcp_wait_handler()
+{
+    return (fnet_tcp_wait_handler_t)fnet_socket_create_dummy();
+}
+
+void fnet_tcp_wait_cancel(fnet_tcp_wait_handler_t h)
+{
+    fnet_socket_close((fnet_socket_t)h);
+}
+
+void fnet_tcp_select(fnet_tcp_client_t **clients,
+     size_t clients_num,
+     fnet_tcp_client_t **rclients,
+     size_t *rclients_num,
+     fnet_tcp_client_t **eclients,
+     size_t *eclients_num,
+     fnet_tcp_wait_handler_t)
+{
+    // TODO
+    return false;
+}

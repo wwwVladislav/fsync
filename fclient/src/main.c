@@ -1,45 +1,48 @@
-#include <fsync/sync.h>
-#include <fnet/transport.h>
+#include "core.h"
 #include <stdio.h>
-#include <unistd.h>
+#include <strings.h>
+#include <ctype.h>
 
-static void clients_accepter(fnet_server_t const *pserver, fnet_client_t *pclient)
+static void fhelp()
 {
-    fnet_disconnect(pclient);
+    printf("\texit: exit the client\n");
+    printf("\thelp: print help\n");
+    printf("\tconnect IP:port: connect to other node\n");
 }
 
-void test_transport()
+static void fconnect(fcore_t *core, char *cmd)
 {
-    fnet_server_t *pserver = fnet_bind(FNET_SSL, "127.0.0.1:12345", clients_accepter);
-    if (pserver)
-    {
-        for(int i = 0; i < 2; ++ i)
-        {
-            fnet_client_t *pclient = fnet_connect(FNET_SSL, "127.0.0.1:12345");
-            if (pclient)
-            {
-                sleep(1);
-                fnet_disconnect(pclient);
-            }
-        }
-
-        fnet_unbind(pserver);
-    }
+    for(; *cmd && isspace(*cmd); ++cmd);
+    char *c = cmd;
+    for(; *c && !isspace(*c); ++c);
+    *c = 0;
+    fcore_connect(core, cmd);
 }
 
-void test_fsync()
-{
-    fsync_t *sync = fsync_create("C:\\Temp");
-    if(sync)
-    {
-        sleep(600);
-        fsync_free(sync);
-    }
-}
+static const char CMD_EXIT[4]    = "exit";
+static const char CMD_HELP[4]    = "help";
+static const char CMD_CONNECT[7] = "connect";
 
 int main()
 {
-    test_fsync();
-    test_transport();
+    fcore_t *core = fcore_start("127.0.0.1:6005");
+    if (core)
+    {
+        char cmd[1024];
+        printf(">");
+
+        while (fgets(cmd, sizeof cmd, stdin))
+        {
+            if (strncasecmp(cmd, "\n", sizeof cmd) == 0)                        ;
+            else if (strncasecmp(cmd, CMD_EXIT, sizeof CMD_EXIT) == 0)          break;
+            else if (strncasecmp(cmd, CMD_HELP, sizeof CMD_HELP) == 0)          fhelp();
+            else if (strncasecmp(cmd, CMD_CONNECT, sizeof CMD_CONNECT) == 0)    fconnect(core, cmd + sizeof CMD_CONNECT);
+            else                                                                printf("Unknown command\n");
+            printf(">");
+        }
+
+        fcore_stop(core);
+    }
+
     return 0;
 }

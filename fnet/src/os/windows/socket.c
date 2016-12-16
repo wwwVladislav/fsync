@@ -22,6 +22,17 @@ void fnet_socket_uninit()
     WSACleanup();
 }
 
+fnet_socket_t fnet_socket_create_dummy()
+{
+    SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock == INVALID_SOCKET)
+    {
+        FS_ERR("Unable to create dummy socket");
+        return FNET_INVALID_SOCKET;
+    }
+    return (fnet_socket_t)sock;
+}
+
 fnet_socket_t fnet_socket_connect(fnet_address_t const *addr)
 {
     if (!addr)
@@ -161,5 +172,59 @@ bool fnet_socket_recv(fnet_socket_t sock, char *buf, size_t len, size_t *read_le
     }
     while (len > 0);
 
+    return true;
+}
+
+bool fnet_socket_select(fnet_socket_t *sockets,
+                        size_t num,
+                        fnet_socket_t *rs,
+                        size_t *rs_num,
+                        fnet_socket_t *es,
+                        size_t *es_num)
+{
+    if (!sockets || !num)   return false;
+    if (!rs && !es)         return false;
+    if (rs && !rs_num)      return false;
+    if (es && !es_num)      return false;
+
+    fd_set readfds;
+    fd_set exceptfds;
+
+    if (rs)
+    {
+        FD_ZERO(&readfds);
+        for(size_t i = 0; i < num; ++i)
+            FD_SET((SOCKET)sockets[i], &readfds);
+        *rs_num = 0;
+    }
+
+    if (es)
+    {
+        FD_ZERO(&exceptfds);
+        for(size_t i = 0; i < num; ++i)
+            FD_SET((SOCKET)sockets[i], &exceptfds);
+        *es_num = 0;
+    }
+
+    int ret = select(0, rs ? &readfds : 0, 0, es ? &exceptfds : 0, 0);
+    if (ret == SOCKET_ERROR)
+    {
+        FS_ERR("Socket waiting was failed");
+        return false;
+    }
+
+    size_t rsi = 0;
+    size_t esi = 0;
+
+    for(size_t i = 0; i < num; ++i)
+    {
+        if (rs && FD_ISSET((SOCKET)sockets[i], &readfds))
+            rs[rsi++] = sockets[i];
+        if (es && FD_ISSET((SOCKET)sockets[i], &exceptfds))
+            es[esi++] = sockets[i];
+    }
+
+    if (rs_num) *rs_num = rsi;
+    if (es_num) *es_num = esi;
     return true;
 }

@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 2.6)
 project(filink)
 
 set(FILINK_HEADERS
+    src/interface.h
+    src/protocol.h
 )
 
 set(FILINK_SOURCES
@@ -11,6 +13,11 @@ set(FILINK_SOURCES
 set(FILINK_LIBS
     futils
     fnet
+)
+
+include_directories(
+    ../fnet/include
+    ../futils/include
 )
 
 if (WIN32)

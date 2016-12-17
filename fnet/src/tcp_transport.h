@@ -22,6 +22,6 @@ bool                    fnet_tcp_select(fnet_tcp_client_t **clients,
                                         size_t *rclients_num,
                                         fnet_tcp_client_t **eclients,
                                         size_t *eclients_num,
-                                        fnet_tcp_wait_handler_t);
+                                        fnet_tcp_wait_handler_t wait_handler);
 
 #endif

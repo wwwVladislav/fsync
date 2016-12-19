@@ -232,12 +232,12 @@ void fnet_tcp_wait_cancel(fnet_tcp_wait_handler_t h)
 }
 
 void fnet_tcp_select(fnet_tcp_client_t **clients,
-     size_t clients_num,
-     fnet_tcp_client_t **rclients,
-     size_t *rclients_num,
-     fnet_tcp_client_t **eclients,
-     size_t *eclients_num,
-     fnet_tcp_wait_handler_t)
+                     size_t clients_num,
+                     fnet_tcp_client_t **rclients,
+                     size_t *rclients_num,
+                     fnet_tcp_client_t **eclients,
+                     size_t *eclients_num,
+                     fnet_tcp_wait_handler_t)
 {
     // TODO
     return false;

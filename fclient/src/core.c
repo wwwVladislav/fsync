@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <futils/log.h>
+#include <futils/uuid.h>
 #include <filink/interface.h>
 
 struct fcore
@@ -25,13 +26,22 @@ fcore_t *fcore_start(char const *addr)
     }
     memset(pcore, 0, sizeof *pcore);
 
-    pcore->ilink = filink_bind(addr);
+    fuuid_t uuid;
+    if (!fuuid_gen(&uuid))
+    {
+        FS_ERR("UUID generation failed for node");
+        fcore_stop(pcore);
+        return 0;
+    }
+
+    pcore->ilink = filink_bind(addr, &uuid);
     if (!pcore->ilink)
     {
         fcore_stop(pcore);
         return 0;
     }
 
+    FS_INFO("Started node UUID: %llx%llx", uuid.data.u64[0], uuid.data.u64[1]);
     return pcore;
 }
 

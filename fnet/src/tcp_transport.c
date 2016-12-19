@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <stdlib.h>
+#include <assert.h>
 
 struct fnet_tcp_client
 {
@@ -221,6 +222,13 @@ void *fnet_tcp_server_get_userdata(fnet_tcp_server_t const *pserver)
     return pserver->user_data;
 }
 
+fnet_tcp_client_t *fnet_tcp_get_transport(fnet_tcp_client_t *pclient)
+{
+    if (pclient)    return pclient;
+    else            FS_ERR("Invalid argument");
+    return 0;
+}
+
 fnet_tcp_wait_handler_t fnet_tcp_wait_handler()
 {
     return (fnet_tcp_wait_handler_t)fnet_socket_create_dummy();
@@ -231,14 +239,69 @@ void fnet_tcp_wait_cancel(fnet_tcp_wait_handler_t h)
     fnet_socket_close((fnet_socket_t)h);
 }
 
-void fnet_tcp_select(fnet_tcp_client_t **clients,
+bool fnet_tcp_select(fnet_tcp_client_t **clients,
                      size_t clients_num,
                      fnet_tcp_client_t **rclients,
                      size_t *rclients_num,
                      fnet_tcp_client_t **eclients,
                      size_t *eclients_num,
-                     fnet_tcp_wait_handler_t)
+                     fnet_tcp_wait_handler_t wait_handler)
 {
-    // TODO
+    fnet_socket_t sockets[clients_num + 1];
+    fnet_socket_t rsockets[clients_num + 1];
+    fnet_socket_t esockets[clients_num + 1];
+    size_t rs_num = 0;
+    size_t es_num = 0;
+
+    sockets[0] = wait_handler;
+    for (size_t i = 0; i < clients_num; ++i)
+        sockets[i + 1] = clients[i]->sock;
+
+    if (!fnet_socket_select(sockets,
+                            clients_num + 1,
+                            rclients ? rsockets : 0,
+                            rclients ? &rs_num : 0,
+                            eclients ? esockets : 0,
+                            eclients ? &es_num : 0))
+        return false;
+
+    if (rclients)
+    {
+        size_t j = 0, n = 0;
+        for(size_t i = 0; i < rs_num; ++i)
+        {
+            for(; j < clients_num + 1 && sockets[j] != rsockets[i]; ++j);
+            if (j != 0 && j <= clients_num)
+                rclients[n++] = clients[j - 1];
+            j++;
+        }
+        *rclients_num = n;
+    }
+
+    if (eclients)
+    {
+        size_t j = 0, n = 0;
+        for(size_t i = 0; i < es_num; ++i)
+        {
+            for(; j < clients_num + 1 && sockets[j] != esockets[i]; ++j);
+            if (j != 0 && j <= clients_num)
+                eclients[n++] = clients[j - 1];
+            j++;
+        }
+        *eclients_num = n;
+    }
+
+    return true;
+}
+
+bool fnet_tcp_send(fnet_tcp_client_t *client, const void *buf, size_t len)
+{
+    assert(0 && "TODO");
+    return false;
+}
+
+bool fnet_tcp_recv(fnet_tcp_client_t *client, void *buf, size_t len)
+{
+    assert(0 && "TODO");
     return false;
 }

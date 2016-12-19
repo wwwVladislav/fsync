@@ -23,9 +23,15 @@ static const char CMD_EXIT[4]    = "exit";
 static const char CMD_HELP[4]    = "help";
 static const char CMD_CONNECT[7] = "connect";
 
-int main()
+int main(int argc, char **argv)
 {
-    fcore_t *core = fcore_start("127.0.0.1:6005");
+    if (argc < 2)
+    {
+        printf("Usage: client.exe IP:port");
+        return 0;
+    }
+    printf("Starting...\n");
+    fcore_t *core = fcore_start(argv[1]);
     if (core)
     {
         char cmd[1024];

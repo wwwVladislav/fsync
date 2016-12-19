@@ -1,11 +1,11 @@
 #include "ssl_transport.h"
-#include "tcp_transport.h"
 #include "config.h"
 #include "socket.h"
 #include <futils/log.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <stdbool.h>
+#include <assert.h>
 
 fnet_socket_t fnet_tcp_client_socket(fnet_tcp_client_t const *);
 
@@ -329,4 +329,44 @@ void fnet_ssl_server_set_userdata(fnet_ssl_server_t *pserver, void *pdata)
 void *fnet_ssl_server_get_userdata(fnet_ssl_server_t const *pserver)
 {
     return pserver->user_data;
+}
+
+fnet_tcp_client_t *fnet_ssl_get_transport(fnet_ssl_client_t *pclient)
+{
+    if (pclient)    return pclient->tcp_client;
+    else            FS_ERR("Invalid argument");
+    return 0;
+}
+
+bool fnet_ssl_send(fnet_ssl_client_t *client, const void *buf, size_t len)
+{
+    if (!client)
+    {
+        FS_ERR("Invalid argument");
+        return false;
+    }
+
+    if (!len)
+        return true;
+
+    int ret = SSL_write(client->ssl, buf, len);
+    if (ret <= 0)
+        FS_INFO("SSL_write failed: %d", SSL_get_error(client->ssl, ret));
+    assert(ret > 0 ? ret == len : true);
+    return ret > 0;
+}
+
+bool fnet_ssl_recv(fnet_ssl_client_t *client, void *buf, size_t len)
+{
+    if (!client)
+    {
+        FS_ERR("Invalid argument");
+        return false;
+    }
+
+    int ret = SSL_read(client->ssl, buf, len);
+    if (ret <= 0)
+        FS_INFO("SSL_read failed: %d", SSL_get_error(client->ssl, ret));
+    assert(ret > 0 ? ret == len : true);
+    return ret > 0;
 }

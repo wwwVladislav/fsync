@@ -8,6 +8,7 @@ set(FILINK_HEADERS
 
 set(FILINK_SOURCES
     src/interface.c
+    src/protocol.c
 )
 
 set(FILINK_LIBS

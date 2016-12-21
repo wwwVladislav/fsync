@@ -8,6 +8,7 @@ set(FNET_HEADERS
     src/tcp_transport.h
     src/ssl_transport.h
     src/socket.h
+    src/marshaller.h
 )
 
 set(FNET_SOURCES
@@ -22,6 +23,7 @@ if (WIN32)
     set(FNET_SOURCES
         ${FNET_SOURCES}
         src/os/windows/socket.c
+        src/os/windows/marshaller.c
     )
 endif (WIN32)
 

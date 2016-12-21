@@ -31,5 +31,7 @@ bool                fnet_select(fnet_client_t **clients,
                                 fnet_wait_handler_t wait_handler);
 bool                fnet_send(fnet_client_t *client, const void *buf, size_t len);
 bool                fnet_recv(fnet_client_t *client, void *buf, size_t len);
+bool                fnet_acquire(fnet_client_t *client);
+void                fnet_release(fnet_client_t *client);
 
 #endif

@@ -18,23 +18,30 @@ enum
 // FPROTO_HELLO_REQ
 typedef struct
 {
-    uint32_t version;   // client side protocol version
-    fuuid_t uuid;       // client uuid
+    uint32_t version;           // client side protocol version
+    fuuid_t uuid;               // client uuid
 } fproto_hello_req_t;
 
 // FPROTO_HELLO_RES
 typedef struct
 {
-    uint32_t version;   // server side protocol version
-    fuuid_t uuid;       // server uuid
+    uint32_t version;           // server side protocol version
+    fuuid_t uuid;               // server uuid
 } fproto_hello_res_t;
 
-bool fproto_req_send(fnet_client_t *client, fproto_msg_t msg, void const *req);
-bool fproto_req_recv(fnet_client_t *client, fproto_msg_t msg, void *req);
-bool fproto_res_send(fnet_client_t *client, fproto_msg_t msg, void const *res);
-bool fproto_res_recv(fnet_client_t *client, fproto_msg_t msg, void *res);
+// bool fproto_req_send(fnet_client_t *client, fproto_msg_t msg, void const *req);
+// bool fproto_req_recv(fnet_client_t *client, fproto_msg_t msg, void *req);
+// bool fproto_res_send(fnet_client_t *client, fproto_msg_t msg, void const *res);
+// bool fproto_res_recv(fnet_client_t *client, fproto_msg_t msg, void *res);
+
+typedef struct
+{
+    int i;
+    // TODO
+} fproto_msg_handlers_t;
 
 bool fproto_client_handshake_request (fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid);
 bool fproto_client_handshake_response(fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid);
+bool fproto_read_message(fnet_client_t *client, fproto_msg_handlers_t *handlers);
 
 #endif

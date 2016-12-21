@@ -26,5 +26,7 @@ bool                    fnet_tcp_select(fnet_tcp_client_t **clients,
                                         fnet_tcp_wait_handler_t wait_handler);
 bool                    fnet_tcp_send(fnet_tcp_client_t *, const void *, size_t);
 bool                    fnet_tcp_recv(fnet_tcp_client_t *, void *, size_t);
+bool                    fnet_tcp_acquire(fnet_tcp_client_t *);
+void                    fnet_tcp_release(fnet_tcp_client_t *);
 
 #endif

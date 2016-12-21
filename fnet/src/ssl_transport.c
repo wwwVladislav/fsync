@@ -5,12 +5,14 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <stdbool.h>
+#include <pthread.h>
 #include <assert.h>
 
 fnet_socket_t fnet_tcp_client_socket(fnet_tcp_client_t const *);
 
 struct fnet_ssl_client
 {
+    pthread_mutex_t    mutex;
     SSL               *ssl;
     fnet_tcp_client_t *tcp_client;
 };
@@ -139,6 +141,9 @@ fnet_ssl_client_t *fnet_ssl_connect(char const *addr)
     }
     memset(pclient, 0, sizeof *pclient);
 
+    static pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
+    pclient->mutex = mutex_initializer;
+
     if (!fnet_ssl_module_init(&fnet_ssl_module))
     {
         fnet_ssl_disconnect(pclient);
@@ -226,8 +231,11 @@ static void fnet_tcp_clients_accepter(fnet_tcp_server_t const *tcp_server, fnet_
                 FS_ERR("Unable to allocate memory for client");
                 break;
             }
-
             memset(pclient, 0, sizeof *pclient);
+
+            static pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
+            pclient->mutex = mutex_initializer;
+
             pclient->tcp_client = tcp_client;
 
             pclient->ssl = SSL_new(fnet_ssl_module.ctx);
@@ -369,4 +377,20 @@ bool fnet_ssl_recv(fnet_ssl_client_t *client, void *buf, size_t len)
         FS_INFO("SSL_read failed: %d", SSL_get_error(client->ssl, ret));
     assert(ret > 0 ? ret == len : true);
     return ret > 0;
+}
+
+bool fnet_ssl_acquire(fnet_ssl_client_t *client)
+{
+    if (pthread_mutex_lock(&client->mutex))
+    {
+        FS_ERR("The mutex locking is failed");
+        return false;
+    }
+    return true;
+}
+
+void fnet_ssl_release(fnet_ssl_client_t *client)
+{
+    (void)client;
+    pthread_mutex_unlock(&client->mutex);
 }

@@ -305,3 +305,15 @@ bool fnet_tcp_recv(fnet_tcp_client_t *client, void *buf, size_t len)
     assert(0 && "TODO");
     return false;
 }
+
+bool fnet_tcp_acquire(fnet_tcp_client_t *client)
+{
+    (void)client;
+    // It isn't implemented because TCP sockets support full-duplex concept.
+    return true;
+}
+
+void fnet_tcp_release(fnet_tcp_client_t *client)
+{
+    (void)client;
+}

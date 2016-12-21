@@ -4,10 +4,13 @@
 #include <futils/log.h>
 #include <futils/uuid.h>
 #include <filink/interface.h>
+#include <fsync/sync.h>
 
 struct fcore
 {
+    fuuid_t   uuid;
     filink_t *ilink;
+    fsync_t  *sync;
 };
 
 fcore_t *fcore_start(char const *addr)
@@ -26,22 +29,21 @@ fcore_t *fcore_start(char const *addr)
     }
     memset(pcore, 0, sizeof *pcore);
 
-    fuuid_t uuid;
-    if (!fuuid_gen(&uuid))
+    if (!fuuid_gen(&pcore->uuid))
     {
         FS_ERR("UUID generation failed for node");
         fcore_stop(pcore);
         return 0;
     }
 
-    pcore->ilink = filink_bind(addr, &uuid);
+    pcore->ilink = filink_bind(addr, &pcore->uuid);
     if (!pcore->ilink)
     {
         fcore_stop(pcore);
         return 0;
     }
 
-    FS_INFO("Started node UUID: %llx%llx", uuid.data.u64[0], uuid.data.u64[1]);
+    FS_INFO("Started node UUID: %llx%llx", pcore->uuid.data.u64[0], pcore->uuid.data.u64[1]);
     return pcore;
 }
 
@@ -78,5 +80,11 @@ bool fcore_sync(fcore_t *pcore, char const *dir)
         FS_ERR("Invalid argument");
         return false;
     }
+
+    if (pcore->sync)
+        fsync_free(pcore->sync);
+
+    pcore->sync = fsync_create(dir, &pcore->uuid);
+
     return true;
 }

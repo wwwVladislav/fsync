@@ -154,7 +154,7 @@ void fsdir_iterator_free(fsiterator_t *piterator)
     }
 }
 
-static size_t fsget_directory_by_iterator(fsiterator_t *piterator, char *subdir, char *path, size_t size)
+static size_t fsget_directory_by_iterator(fsiterator_t *piterator, char *subdir, char *path, size_t size, bool full_path)
 {
     if (!piterator || !path) return 0;
 
@@ -165,23 +165,29 @@ static size_t fsget_directory_by_iterator(fsiterator_t *piterator, char *subdir,
         *ch && wsize < sizeof piterator->path;
         ++ch)
     {
-        if (wsize < size)
-            path[wsize] = *ch;
+        if (full_path)
+        {
+            if (wsize < size)
+                path[wsize] = *ch;
+            ++wsize;
+        }
         if (*ch == '\\')
             delimiter = '\\';
-        ++wsize;
     }
 
     for (unsigned short i = 0; i < piterator->depth; ++i)
     {
         fsdir_t *pdir = &piterator->dirs[i];
 
-        if (pdir->name[0]
-            && wsize
-            && wsize < size
-            && path[wsize - 1] != '/'
-            && path[wsize - 1] != '\\')
-            path[wsize++] = delimiter;
+        if (full_path || i != 0)
+        {
+            if (pdir->name[0]
+                && wsize
+                && wsize < size
+                && path[wsize - 1] != '/'
+                && path[wsize - 1] != '\\')
+                path[wsize++] = delimiter;
+        }
 
         for(char *ch = pdir->name;
             *ch && (ch - pdir->name) < sizeof pdir->name;
@@ -232,7 +238,7 @@ bool fsdir_iterator_next(fsiterator_t *piterator, dirent_t *pentry)
                     }
 
                     char path[FSMAX_PATH];
-                    size_t len = fsget_directory_by_iterator(piterator, pentry->name, path, sizeof path);
+                    size_t len = fsget_directory_by_iterator(piterator, pentry->name, path, sizeof path, true);
                     if (len >= sizeof path)
                     {
                         FS_ERR("The directory \'%s\' is skipped due the restriction for maximum path length", pentry->name);
@@ -260,5 +266,5 @@ bool fsdir_iterator_next(fsiterator_t *piterator, dirent_t *pentry)
 
 size_t fsdir_iterator_directory(fsiterator_t *piterator, char *path, size_t size)
 {
-    return fsget_directory_by_iterator(piterator, 0, path, size);
+    return fsget_directory_by_iterator(piterator, 0, path, size, false);
 }

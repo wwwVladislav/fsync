@@ -2,14 +2,16 @@
 #include "tcp_transport.h"
 #include "ssl_transport.h"
 #include <futils/log.h>
- #include <stdlib.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef void               (*fnet_disconnect_t)   (void *);
 typedef void               (*fnet_unbind_t)       (void *);
 typedef fnet_tcp_client_t* (*fnet_get_transport_t)(void *);
 typedef bool               (*fnet_send_t)         (void *, const void *, size_t);
-typedef bool               (*fnet_recv_t)         (fnet_client_t *, void *, size_t);
+typedef bool               (*fnet_recv_t)         (void *, void *, size_t);
+typedef bool               (*fnet_acquire_t)      (void *);
+typedef void               (*fnet_release_t)      (void *);
 
 struct fnet_client
 {
@@ -19,6 +21,8 @@ struct fnet_client
     fnet_get_transport_t get_transoport;
     fnet_send_t          send;
     fnet_recv_t          recv;
+    fnet_acquire_t       acquire;
+    fnet_release_t       release;
 };
 
 struct fnet_server
@@ -60,6 +64,8 @@ fnet_client_t *fnet_connect(fnet_transport_t transport, char const *addr)
             pclient->get_transoport = (fnet_get_transport_t)fnet_tcp_get_transport;
             pclient->send = (fnet_send_t)fnet_tcp_send;
             pclient->recv = (fnet_recv_t)fnet_tcp_recv;
+            pclient->acquire = (fnet_acquire_t)fnet_tcp_acquire;
+            pclient->release = (fnet_release_t)fnet_tcp_release;
             break;
         }
 
@@ -76,6 +82,8 @@ fnet_client_t *fnet_connect(fnet_transport_t transport, char const *addr)
             pclient->get_transoport = (fnet_get_transport_t)fnet_ssl_get_transport;
             pclient->send = (fnet_send_t)fnet_ssl_send;
             pclient->recv = (fnet_recv_t)fnet_ssl_recv;
+            pclient->acquire = (fnet_acquire_t)fnet_ssl_acquire;
+            pclient->release = (fnet_release_t)fnet_ssl_release;
             break;
         }
 
@@ -118,6 +126,8 @@ static void fnet_tcp_accepter(fnet_tcp_server_t const *tcp_server, fnet_tcp_clie
         pclient->get_transoport = (fnet_get_transport_t)fnet_tcp_get_transport;
         pclient->send = (fnet_send_t)fnet_tcp_send;
         pclient->recv = (fnet_recv_t)fnet_tcp_recv;
+        pclient->acquire = (fnet_acquire_t)fnet_tcp_acquire;
+        pclient->release = (fnet_release_t)fnet_tcp_release;
 
         fnet_server_t *pserver = (fnet_server_t*)fnet_tcp_server_get_userdata(tcp_server);
         pserver->accepter(pserver, pclient);
@@ -141,6 +151,8 @@ static void fnet_ssl_accepter(fnet_ssl_server_t const *ssl_server, fnet_ssl_clie
         pclient->get_transoport = (fnet_get_transport_t)fnet_ssl_get_transport;
         pclient->send = (fnet_send_t)fnet_ssl_send;
         pclient->recv = (fnet_recv_t)fnet_ssl_recv;
+        pclient->acquire = (fnet_acquire_t)fnet_ssl_acquire;
+        pclient->release = (fnet_release_t)fnet_ssl_release;
 
         fnet_server_t *pserver = (fnet_server_t*)fnet_ssl_server_get_userdata(ssl_server);
         pserver->accepter(pserver, pclient);
@@ -302,4 +314,14 @@ bool fnet_send(fnet_client_t *client, const void *buf, size_t len)
 bool fnet_recv(fnet_client_t *client, void *buf, size_t len)
 {
     return client->recv(client->pimpl, buf, len);
+}
+
+bool fnet_acquire(fnet_client_t *client)
+{
+    return client->acquire(client->pimpl);
+}
+
+void fnet_release(fnet_client_t *client)
+{
+    client->release(client->pimpl);
 }

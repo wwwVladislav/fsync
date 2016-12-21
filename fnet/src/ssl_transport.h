@@ -15,5 +15,7 @@ void              *fnet_ssl_server_get_userdata(fnet_ssl_server_t const *);
 fnet_tcp_client_t *fnet_ssl_get_transport(fnet_ssl_client_t *);
 bool               fnet_ssl_send(fnet_ssl_client_t *, const void *, size_t);
 bool               fnet_ssl_recv(fnet_ssl_client_t *, void *, size_t);
+bool               fnet_ssl_acquire(fnet_ssl_client_t *);
+void               fnet_ssl_release(fnet_ssl_client_t *);
 
 #endif

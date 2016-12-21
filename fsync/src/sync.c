@@ -32,6 +32,8 @@ struct fsync
 {
     volatile bool       is_active;
 
+    fuuid_t             uuid;
+
     sem_t               events_sem;                                                                         // semaphore for events waiting
     fring_queue_t       *events_queue;                                                                      // events queue
     char                queue_buf[FSYNC_QUEUEBUF_SIZE];                                                     // buffer for file events queue
@@ -135,6 +137,7 @@ static void *fsync_thread(void *param)
 
                 if (cur_time - modification_time >= FSYNC_TIMEOUT)
                 {
+                    // TODO
                     FS_INFO("Sync: [%d] %s", modification_time, psync->files_list[i]->path);
                     fsync_remove_file_from_list(psync, i);
                 }
@@ -149,11 +152,17 @@ static void *fsync_thread(void *param)
     return 0;
 }
 
-fsync_t *fsync_create(char const *dir)
+fsync_t *fsync_create(char const *dir, fuuid_t const *uuid)
 {
     if (!dir || !*dir)
     {
         FS_ERR("Invalid directory path");
+        return 0;
+    }
+
+    if (!uuid)
+    {
+        FS_ERR("Invalid UUID");
         return 0;
     }
 
@@ -164,6 +173,8 @@ fsync_t *fsync_create(char const *dir)
         return 0;
     }
     memset(psync, 0, sizeof *psync);
+
+    psync->uuid = *uuid;
 
     if (fstatic_allocator_create(psync->fla_buf, sizeof psync->fla_buf, sizeof(fsdir_event_t), &psync->files_list_allocator) != FSUCCESS)
     {

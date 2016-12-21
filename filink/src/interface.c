@@ -20,14 +20,15 @@ typedef struct
 
 struct filink
 {
-    volatile bool       is_active;
-    fuuid_t             uuid;
-    pthread_t           thread;
-    fnet_server_t      *server;
-    pthread_mutex_t     nodes_mutex;
-    volatile size_t     nodes_num;
-    node_t              nodes[FILINK_MAX_ALLOWED_CONNECTIONS_NUM];
-    fnet_wait_handler_t wait_handler;
+    volatile bool         is_active;
+    fuuid_t               uuid;
+    pthread_t             thread;
+    fnet_server_t        *server;
+    pthread_mutex_t       nodes_mutex;
+    volatile size_t       nodes_num;
+    node_t                nodes[FILINK_MAX_ALLOWED_CONNECTIONS_NUM];
+    fnet_wait_handler_t   wait_handler;
+    fproto_msg_handlers_t proto_handlers;
 };
 
 #define filink_push_lock(mutex)                     \
@@ -71,6 +72,27 @@ static bool filink_add_node(filink_t *ilink, fnet_client_t *pclient, fuuid_t con
     }
     filink_pop_lock();
     return ret;
+}
+
+static void filink_remove_node(filink_t *ilink, fnet_client_t *pclient)
+{
+    filink_push_lock(ilink->nodes_mutex);
+    size_t i = 0;
+    for(; i < ilink->nodes_num; ++i)
+    {
+        if (ilink->nodes[i].transport == pclient)
+        {
+            fnet_disconnect(pclient);
+            break;
+        }
+    }
+
+    for(i++; i < ilink->nodes_num; ++i)
+        ilink->nodes[i - 1] = ilink->nodes[i];
+    ilink->nodes_num--;
+    ilink->nodes[ilink->nodes_num].transport = 0;
+
+    filink_pop_lock();
 }
 
 static void filink_clients_accepter(fnet_server_t const *pserver, fnet_client_t *pclient)
@@ -125,7 +147,17 @@ static void *filink_thread(void *param)
                                ilink->wait_handler);
         if (!ret) continue;
 
-        // TODO: handle clients
+        for(size_t i = 0; i < rclients_num; ++i)
+        {
+            if (!fproto_read_message(rclients[i], &ilink->proto_handlers))
+            {
+                FS_INFO("Node has disconnected");
+                filink_remove_node(ilink, rclients[i]);
+            }
+        }
+
+        for(size_t i = 0; i < eclients_num; ++i)
+            filink_remove_node(ilink, eclients[i]);
     }
 
     return 0;

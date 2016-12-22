@@ -19,6 +19,7 @@ set(FILINK_LIBS
 include_directories(
     ../fnet/include
     ../futils/include
+    ../fcommon/include
 )
 
 if (WIN32)

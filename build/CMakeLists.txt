@@ -95,7 +95,7 @@ macro(use_c99)
   endif ()
 endmacro(use_c99)
 
-add_subdirectory(../libs/vedis  vedis)
+add_subdirectory(../libs/sqlite sqlite)
 add_subdirectory(../futils      futils)
 add_subdirectory(../fsync       fsync)
 add_subdirectory(../fnet        fnet)

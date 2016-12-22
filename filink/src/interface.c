@@ -29,6 +29,7 @@ struct filink
     node_t                nodes[FILINK_MAX_ALLOWED_CONNECTIONS_NUM];
     fnet_wait_handler_t   wait_handler;
     fproto_msg_handlers_t proto_handlers;
+    fmsgbus_t            *msgbus;
 };
 
 #define filink_push_lock(mutex)                     \
@@ -93,6 +94,11 @@ static void filink_remove_node(filink_t *ilink, fnet_client_t *pclient)
     ilink->nodes[ilink->nodes_num].transport = 0;
 
     filink_pop_lock();
+}
+
+void filink_node_status_handler(filink_t *ilink, fuuid_t const *uuid, uint32_t status)
+{
+    // TODO
 }
 
 static void filink_clients_accepter(fnet_server_t const *pserver, fnet_client_t *pclient)
@@ -163,8 +169,14 @@ static void *filink_thread(void *param)
     return 0;
 }
 
-filink_t *filink_bind(char const *addr, fuuid_t const *uuid)
+filink_t *filink_bind(fmsgbus_t *pmsgbus, char const *addr, fuuid_t const *uuid)
 {
+    if (!pmsgbus)
+    {
+        FS_ERR("Invalid messages bus");
+        return 0;
+    }
+
     if (!addr)
     {
         FS_ERR("Invalid address");
@@ -186,6 +198,11 @@ filink_t *filink_bind(char const *addr, fuuid_t const *uuid)
     memset(ilink, 0, sizeof *ilink);
 
     ilink->uuid = *uuid;
+
+    ilink->proto_handlers.user_data = ilink;
+    ilink->proto_handlers.node_status_handler = (fproto_node_status_handler_t)filink_node_status_handler;
+
+    ilink->msgbus = fmsgbus_retain(pmsgbus);
 
     ilink->server = fnet_bind(FNET_SSL, addr, filink_clients_accepter);
     if (!ilink->server)
@@ -235,6 +252,8 @@ void filink_unbind(filink_t *ilink)
             if (ilink->nodes[i].transport)
                 fnet_disconnect(ilink->nodes[i].transport);
         }
+
+        fmsgbus_release(ilink->msgbus);
 
         free(ilink);
     }

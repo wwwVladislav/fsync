@@ -9,6 +9,7 @@ set(FUTILS_HEADERS
     src/queue.h
     src/static_allocator.h
     src/static_assert.h
+    src/msgbus.h
 )
 
 set(FUTILS_SOURCES
@@ -16,6 +17,7 @@ set(FUTILS_SOURCES
     src/prefix_tree.c
     src/queue.c
     src/static_allocator.c
+    src/msgbus.c
 )
 
 if (WIN32)

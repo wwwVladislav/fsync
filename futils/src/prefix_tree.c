@@ -172,7 +172,7 @@ ferr_t fptree_create(void *buf, uint32_t size, uint32_t key_len, fptree_t **pptr
         || size < sizeof(fptree_t)
         || !pptree
         || key_len > FPTREE_MAX_KEY_LEN)
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     memset(ptr, 0, sizeof(fptree_t));
     ptr->signature = FPTREE_SIGNATURE;
     ptr->key_len = key_len;
@@ -193,7 +193,7 @@ void fptree_delete(fptree_t *ptr)
 ferr_t fptree_clear(fptree_t *ptr)
 {
     if (!fptree_is_valid(ptr))
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     ptr->root = 0;
     return fstatic_allocator_clear(ptr->sallocator);
 }
@@ -207,7 +207,7 @@ static ferr_t fptree_node_insert_impl(fptree_t *ptr, uint8_t const *key, uint32_
     if (!fptree_is_valid(ptr)
         || !key
         || key_len > ptr->key_len)
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
 
     if (is_unique)
         *is_unique = true;
@@ -231,7 +231,7 @@ static ferr_t fptree_node_insert_impl(fptree_t *ptr, uint8_t const *key, uint32_
     if (!eq_total)
     {
         new_leaf = fstatic_alloc(ptr->sallocator);
-        if (!new_leaf) return FNO_MEM;
+        if (!new_leaf) return FERR_NO_MEM;
         // insert sibling. Node isn't found.
         assert(!p && !eq_node);
         fptree_add_sibling(ptr->root, new_leaf, key, key_len, data);
@@ -256,7 +256,7 @@ static ferr_t fptree_node_insert_impl(fptree_t *ptr, uint8_t const *key, uint32_
 
         // add new node to childs list
         new_leaf = fstatic_alloc(ptr->sallocator);
-        if (!new_leaf) return FNO_MEM;
+        if (!new_leaf) return FERR_NO_MEM;
         fptree_add_child(p, new_leaf, key + eq_total, key_len - eq_total, data);
     }
     else if (eq_node && eq_node < p->key_len)
@@ -265,11 +265,11 @@ static ferr_t fptree_node_insert_impl(fptree_t *ptr, uint8_t const *key, uint32_
         {
             // split existing node and add new
             if (fstatic_allocator_available(ptr->sallocator) < 1)
-                return FNO_MEM;
+                return FERR_NO_MEM;
 
             // split existing node
             new_leaf = fstatic_alloc(ptr->sallocator);
-            if (!new_leaf) return FNO_MEM;
+            if (!new_leaf) return FERR_NO_MEM;
             fptree_split_leaf(p, new_leaf, eq_node);
 
             p->data = data;
@@ -278,16 +278,16 @@ static ferr_t fptree_node_insert_impl(fptree_t *ptr, uint8_t const *key, uint32_
         {
             // split existing node and add new
             if (fstatic_allocator_available(ptr->sallocator) < 2)
-                return FNO_MEM;
+                return FERR_NO_MEM;
 
             // split existing node
             new_leaf = fstatic_alloc(ptr->sallocator);
-            if (!new_leaf) return FNO_MEM;
+            if (!new_leaf) return FERR_NO_MEM;
             fptree_split_leaf(p, new_leaf, eq_node);
 
             // add new node
             new_leaf = fstatic_alloc(ptr->sallocator);
-            if (!new_leaf) return FNO_MEM;
+            if (!new_leaf) return FERR_NO_MEM;
             fptree_add_child(p, new_leaf, key + eq_total, key_len - eq_total, data);
         }
     }
@@ -319,7 +319,7 @@ ferr_t fptree_node_delete(fptree_t *ptr, uint8_t const *key, uint32_t key_len)
     if (!fptree_is_valid(ptr)
         || !key
         || key_len > ptr->key_len)
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
 
     p = fptree_find_leaf(ptr->root, key, key_len, &eq_total, &eq_node, &prev_sibling);
 
@@ -380,7 +380,7 @@ ferr_t fptree_node_find(fptree_t *ptr, uint8_t const *key, uint32_t key_len, voi
     if (!fptree_is_valid(ptr)
         || !key
         || key_len > ptr->key_len)
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
 
     leaf = fptree_find_leaf(ptr->root, key, key_len, &eq_total, &eq_node, 0);
 
@@ -407,10 +407,10 @@ ferr_t fptree_iterator_create(fptree_t *ptr, fptree_iterator_t **iter)
     fptree_iterator_t *it;
     if (!fptree_is_valid(ptr)
         || !iter)
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     *iter = 0;
     it = malloc(sizeof(fptree_iterator_t) + sizeof(fptree_leaf_t*) * fstatic_allocator_allocated(ptr->sallocator));
-    if (!it) return FNO_MEM;
+    if (!it) return FERR_NO_MEM;
     it->type = FPTREE_CHILDS_ITERATOR;
     it->tree = ptr;
     it->size = fstatic_allocator_allocated(ptr->sallocator);
@@ -439,7 +439,7 @@ static void fptree_get_node(fptree_iterator_t *iter, fptree_node_t *node)
 ferr_t fptree_first(fptree_iterator_t *iter, fptree_node_t *node)
 {
     if (!iter || !node)
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     if (!iter->tree->root)
         return FFAIL;
 
@@ -460,7 +460,7 @@ ferr_t fptree_next(fptree_iterator_t *iter, fptree_node_t *node)
 {
     fptree_leaf_t *p;
     if (!iter || !node)
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     if (!iter->top)
         return FFAIL;
     if (!iter->tree->root)
@@ -503,7 +503,7 @@ ferr_t fptree_next(fptree_iterator_t *iter, fptree_node_t *node)
 ferr_t fptree_iterator_node_delete(fptree_iterator_t *iter)
 {
     if (!iter)
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     if (!iter->top)
         return FFAIL;
     if (!iter->tree->root)

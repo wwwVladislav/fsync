@@ -2,46 +2,51 @@
 #define PROTOCOL_H_FILINK
 #include <futils/uuid.h>
 #include <fnet/transport.h>
+#include <stdbool.h>
 
 // Message types
 typedef enum
 {
-    FPROTO_HELLO = 0
+    FPROTO_HELLO = 0,           // Handshake
+    FPROTO_NODE_STATUS          // Node status notification
 } fproto_msg_t;
 
 enum
 {
-    FPROTO_VERSION = 1,         // Protocol version 1
-    FPROTO_RESPONSE = 1 << 31   // Mask for response
+    FPROTO_VERSION = 1          // Protocol version 1
 };
 
-// FPROTO_HELLO_REQ
+// FPROTO_HELLO
 typedef struct
 {
-    uint32_t version;           // client side protocol version
-    fuuid_t uuid;               // client uuid
-} fproto_hello_req_t;
+    fuuid_t  uuid;              // node uuid
+    uint32_t version;           // protocol version
+} fproto_hello_t;
 
-// FPROTO_HELLO_RES
-typedef struct
+// FPROTO_NODE_STATUS
+enum
 {
-    uint32_t version;           // server side protocol version
-    fuuid_t uuid;               // server uuid
-} fproto_hello_res_t;
-
-// bool fproto_req_send(fnet_client_t *client, fproto_msg_t msg, void const *req);
-// bool fproto_req_recv(fnet_client_t *client, fproto_msg_t msg, void *req);
-// bool fproto_res_send(fnet_client_t *client, fproto_msg_t msg, void const *res);
-// bool fproto_res_recv(fnet_client_t *client, fproto_msg_t msg, void *res);
+    FPROTO_STATUS_READY4SYNC    = 1 << 0    // Node is ready for files synchronization
+};
 
 typedef struct
 {
-    int i;
-    // TODO
+    fuuid_t  uuid;
+    uint32_t status;
+} fproto_node_status_t;
+
+// Message handlers
+typedef void (*fproto_node_status_handler_t)(void *, fuuid_t const *, uint32_t);
+
+typedef struct
+{
+    void                           *user_data;
+    fproto_node_status_handler_t    node_status_handler;
 } fproto_msg_handlers_t;
 
 bool fproto_client_handshake_request (fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid);
 bool fproto_client_handshake_response(fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid);
-bool fproto_read_message(fnet_client_t *client, fproto_msg_handlers_t *handlers);
+bool fproto_notify_node_status       (fnet_client_t *client, fuuid_t const *uuid, uint32_t status);
+bool fproto_read_message             (fnet_client_t *client, fproto_msg_handlers_t *handlers);
 
 #endif

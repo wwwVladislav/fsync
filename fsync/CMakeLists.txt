@@ -21,11 +21,12 @@ set(FSYNC_SOURCES
 
 find_package(LIBRSYNC REQUIRED)
 
-message (STATUS "LIBRSYNC_INCLUDES = ${LIBRSYNC_INCLUDES}")
+message(STATUS "LIBRSYNC_INCLUDES = ${LIBRSYNC_INCLUDES}")
 
 include_directories(
     ${LIBRSYNC_INCLUDES}
     ../futils/include
+    ../fcommon/include
 )
 
 use_c99()

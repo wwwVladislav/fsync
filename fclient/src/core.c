@@ -3,14 +3,16 @@
 #include <string.h>
 #include <futils/log.h>
 #include <futils/uuid.h>
+#include <futils/msgbus.h>
 #include <filink/interface.h>
 #include <fsync/sync.h>
 
 struct fcore
 {
-    fuuid_t   uuid;
-    filink_t *ilink;
-    fsync_t  *sync;
+    fuuid_t    uuid;
+    fmsgbus_t *msgbus;
+    filink_t  *ilink;
+    fsync_t   *sync;
 };
 
 fcore_t *fcore_start(char const *addr)
@@ -36,7 +38,14 @@ fcore_t *fcore_start(char const *addr)
         return 0;
     }
 
-    pcore->ilink = filink_bind(addr, &pcore->uuid);
+    if (fmsgbus_create(&pcore->msgbus) != FSUCCESS)
+    {
+        FS_ERR("Messages bus not initialized");
+        fcore_stop(pcore);
+        return 0;
+    }
+
+    pcore->ilink = filink_bind(pcore->msgbus, addr, &pcore->uuid);
     if (!pcore->ilink)
     {
         fcore_stop(pcore);
@@ -52,6 +61,8 @@ void fcore_stop(fcore_t *pcore)
     if (pcore)
     {
         filink_unbind(pcore->ilink);
+        fsync_free(pcore->sync);
+        fmsgbus_release(pcore->msgbus);
         free(pcore);
     }
 }
@@ -84,7 +95,7 @@ bool fcore_sync(fcore_t *pcore, char const *dir)
     if (pcore->sync)
         fsync_free(pcore->sync);
 
-    pcore->sync = fsync_create(dir, &pcore->uuid);
+    pcore->sync = fsync_create(pcore->msgbus, dir, &pcore->uuid);
 
     return true;
 }

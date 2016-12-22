@@ -7,10 +7,11 @@
 
 typedef enum ferr
 {
-    FSUCCESS     =  0,
-    FFAIL        = -1,
-    FINVALID_ARG = -2,
-    FNO_MEM      = -3
+    FSUCCESS         =  0,
+    FFAIL            = -1,
+    FERR_INVALID_ARG = -2,
+    FERR_NO_MEM      = -3,
+    FERR_UNKNOWN     = -4
 } ferr_t;
 
 #endif

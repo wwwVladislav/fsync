@@ -30,22 +30,24 @@ typedef struct
 
 struct fsync
 {
-    volatile bool       is_active;
+    volatile bool        is_active;
 
-    fuuid_t             uuid;
+    fuuid_t              uuid;
 
-    sem_t               events_sem;                                                                         // semaphore for events waiting
-    fring_queue_t       *events_queue;                                                                      // events queue
-    char                queue_buf[FSYNC_QUEUEBUF_SIZE];                                                     // buffer for file events queue
+    sem_t                events_sem;                                                                         // semaphore for events waiting
+    fring_queue_t       *events_queue;                                                                       // events queue
+    char                 queue_buf[FSYNC_QUEUEBUF_SIZE];                                                     // buffer for file events queue
 
-    char                fla_buf[FSTATIC_ALLOCATOR_MEM_NEED(FSYNC_FILES_LIST_SIZE, sizeof(fchanged_file_t))];// buffer for files list allocator
-    fstatic_allocator_t *files_list_allocator;                                                              // files list allocator
-    fchanged_file_t     *files_list[FSYNC_FILES_LIST_SIZE];                                                 // TODO: use prefix tree
-    size_t              files_list_size;                                                                    // files list size
+    char                 fla_buf[FSTATIC_ALLOCATOR_MEM_NEED(FSYNC_FILES_LIST_SIZE, sizeof(fchanged_file_t))];// buffer for files list allocator
+    fstatic_allocator_t *files_list_allocator;                                                               // files list allocator
+    fchanged_file_t     *files_list[FSYNC_FILES_LIST_SIZE];                                                  // TODO: use prefix tree
+    size_t               files_list_size;                                                                    // files list size
 
-    pthread_t           thread;
+    pthread_t            thread;
     fsdir_listener_t    *dir_listener;
-    time_t              sync_time;
+    time_t               sync_time;
+
+    fmsgbus_t           *msgbus;
 };
 
 static int fsdir_compare(const void *pa, const void *pb)
@@ -152,8 +154,14 @@ static void *fsync_thread(void *param)
     return 0;
 }
 
-fsync_t *fsync_create(char const *dir, fuuid_t const *uuid)
+fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
 {
+    if (!pmsgbus)
+    {
+        FS_ERR("Invalid messages bus");
+        return 0;
+    }
+
     if (!dir || !*dir)
     {
         FS_ERR("Invalid directory path");
@@ -175,6 +183,8 @@ fsync_t *fsync_create(char const *dir, fuuid_t const *uuid)
     memset(psync, 0, sizeof *psync);
 
     psync->uuid = *uuid;
+
+    psync->msgbus = fmsgbus_retain(pmsgbus);
 
     if (fstatic_allocator_create(psync->fla_buf, sizeof psync->fla_buf, sizeof(fsdir_event_t), &psync->files_list_allocator) != FSUCCESS)
     {
@@ -245,6 +255,7 @@ void fsync_free(fsync_t *psync)
         fring_queue_free(psync->events_queue);
         fstatic_allocator_delete(psync->files_list_allocator);
         sem_destroy(&psync->events_sem);
+        fmsgbus_release(psync->msgbus);
         free(psync);
     }
 }

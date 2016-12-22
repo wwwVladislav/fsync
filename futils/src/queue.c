@@ -26,7 +26,7 @@ ferr_t fring_queue_create(void *buf, uint32_t size, fring_queue_t **ppqueue)
         || !ppqueue)
     {
         FS_ERR("Invalid arguments");
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     }
 
     fring_queue_t *pqueue = (fring_queue_t*)buf;
@@ -51,7 +51,7 @@ ferr_t fring_queue_push_back(fring_queue_t *pqueue, void const *data, uint32_t s
     if (!pqueue || pqueue->status != FRING_QUEUE_INITIALIZED)
     {
         FS_ERR("Invalid queue");
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     }
 
     unsigned const data_size = sizeof(unsigned) + size;
@@ -83,7 +83,7 @@ ferr_t fring_queue_push_back(fring_queue_t *pqueue, void const *data, uint32_t s
         else
         {
             FS_WARN("There is no free space.");
-            return FNO_MEM;
+            return FERR_NO_MEM;
         }
     }
     else
@@ -98,7 +98,7 @@ ferr_t fring_queue_push_back(fring_queue_t *pqueue, void const *data, uint32_t s
         else
         {
             FS_WARN("There is no free space.");
-            return FNO_MEM;
+            return FERR_NO_MEM;
         }
     }
 
@@ -110,13 +110,13 @@ ferr_t fring_queue_front(fring_queue_t *pqueue, void **pdata, uint32_t *psize)
     if (!pqueue || pqueue->status != FRING_QUEUE_INITIALIZED)
     {
         FS_ERR("Invalid queue");
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     }
 
     if (!pdata || !psize)
     {
         FS_ERR("Invalid arguments");
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     }
 
     if (pqueue->end == pqueue->start)
@@ -147,7 +147,7 @@ ferr_t fring_queue_pop_front(fring_queue_t *pqueue)
     if (!pqueue || pqueue->status != FRING_QUEUE_INITIALIZED)
     {
         FS_ERR("Invalid queue");
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     }
 
     if (pqueue->end == pqueue->start)

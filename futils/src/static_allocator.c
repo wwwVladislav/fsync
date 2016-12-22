@@ -29,7 +29,7 @@ ferr_t fstatic_allocator_create(void *buf, uint32_t size, uint32_t item_size, fs
         || size < sizeof(fstatic_allocator_t)
         || !item_size
         || !ppallocator)
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
 
     memset(buf, 0, size);
     ptr->signature = FSTATIC_ALLOCATOR_SIGNATURE;
@@ -54,7 +54,7 @@ ferr_t fstatic_allocator_clear(fstatic_allocator_t *pallocator)
 {
     uint32_t i = 0;
     if (!fstatic_allocator_is_valid(pallocator))
-        return FINVALID_ARG;
+        return FERR_INVALID_ARG;
     pallocator->size = 0;
     for(i = 0; i < pallocator->capacity; ++i)
         pallocator->free_blocks[i] = i;

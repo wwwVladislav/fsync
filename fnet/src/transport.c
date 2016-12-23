@@ -30,7 +30,7 @@ struct fnet_server
     fnet_accepter_t   accepter;
     void             *pimpl;
     fnet_unbind_t     unbind;
-    void             *user_data;
+    void             *param;
 };
 
 fnet_client_t *fnet_connect(fnet_transport_t transport, char const *addr)
@@ -129,7 +129,7 @@ static void fnet_tcp_accepter(fnet_tcp_server_t const *tcp_server, fnet_tcp_clie
         pclient->acquire = (fnet_acquire_t)fnet_tcp_acquire;
         pclient->release = (fnet_release_t)fnet_tcp_release;
 
-        fnet_server_t *pserver = (fnet_server_t*)fnet_tcp_server_get_userdata(tcp_server);
+        fnet_server_t *pserver = (fnet_server_t*)fnet_tcp_server_get_param(tcp_server);
         pserver->accepter(pserver, pclient);
     }
 }
@@ -154,7 +154,7 @@ static void fnet_ssl_accepter(fnet_ssl_server_t const *ssl_server, fnet_ssl_clie
         pclient->acquire = (fnet_acquire_t)fnet_ssl_acquire;
         pclient->release = (fnet_release_t)fnet_ssl_release;
 
-        fnet_server_t *pserver = (fnet_server_t*)fnet_ssl_server_get_userdata(ssl_server);
+        fnet_server_t *pserver = (fnet_server_t*)fnet_ssl_server_get_param(ssl_server);
         pserver->accepter(pserver, pclient);
     }
 }
@@ -188,7 +188,7 @@ fnet_server_t *fnet_bind(fnet_transport_t transport, char const *addr, fnet_acce
                 return 0;
             }
 
-            fnet_tcp_server_set_userdata(pserver->pimpl, pserver);
+            fnet_tcp_server_set_param(pserver->pimpl, pserver);
 
             pserver->unbind = (fnet_unbind_t)fnet_tcp_unbind;
             break;
@@ -203,7 +203,7 @@ fnet_server_t *fnet_bind(fnet_transport_t transport, char const *addr, fnet_acce
                 return 0;
             }
 
-            fnet_ssl_server_set_userdata(pserver->pimpl, pserver);
+            fnet_ssl_server_set_param(pserver->pimpl, pserver);
 
             pserver->unbind = (fnet_unbind_t)fnet_ssl_unbind;
             break;
@@ -231,14 +231,14 @@ void fnet_unbind(fnet_server_t *pserver)
     else FS_ERR("Invalid argument");
 }
 
-void fnet_server_set_userdata(fnet_server_t *pserver, void *pdata)
+void fnet_server_set_param(fnet_server_t *pserver, void *param)
 {
-    pserver->user_data = pdata;
+    pserver->param = param;
 }
 
-void *fnet_server_get_userdata(fnet_server_t const *pserver)
+void *fnet_server_get_param(fnet_server_t const *pserver)
 {
-    return pserver->user_data;
+    return pserver->param;
 }
 
 fnet_wait_handler_t fnet_wait_handler()

@@ -19,7 +19,7 @@ struct fnet_tcp_server
     fnet_socket_t       sock;
     pthread_t           thread;
     fnet_tcp_accepter_t accepter;
-    void               *user_data;
+    void               *param;
 };
 
 typedef struct
@@ -212,14 +212,14 @@ void fnet_tcp_unbind(fnet_tcp_server_t *pserver)
     else FS_ERR("Invalid argument");
 }
 
-void fnet_tcp_server_set_userdata(fnet_tcp_server_t *pserver, void *pdata)
+void fnet_tcp_server_set_param(fnet_tcp_server_t *pserver, void *param)
 {
-    pserver->user_data = pdata;
+    pserver->param = param;
 }
 
-void *fnet_tcp_server_get_userdata(fnet_tcp_server_t const *pserver)
+void *fnet_tcp_server_get_param(fnet_tcp_server_t const *pserver)
 {
-    return pserver->user_data;
+    return pserver->param;
 }
 
 fnet_tcp_client_t *fnet_tcp_get_transport(fnet_tcp_client_t *pclient)

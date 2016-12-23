@@ -40,13 +40,13 @@ typedef void (*fproto_node_status_handler_t)(void *, fuuid_t const *, uint32_t);
 
 typedef struct
 {
-    void                           *user_data;
+    void                           *param;
     fproto_node_status_handler_t    node_status_handler;
 } fproto_msg_handlers_t;
 
 bool fproto_client_handshake_request (fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid);
 bool fproto_client_handshake_response(fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid);
-bool fproto_notify_node_status       (fnet_client_t *client, fuuid_t const *uuid, uint32_t status);
+bool fproto_send                     (fnet_client_t *client, fproto_msg_t msg, uint8_t const *data);
 bool fproto_read_message             (fnet_client_t *client, fproto_msg_handlers_t *handlers);
 
 #endif

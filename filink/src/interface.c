@@ -2,6 +2,7 @@
 #include "protocol.h"
 #include <fnet/transport.h>
 #include <futils/log.h>
+#include <messages.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
@@ -39,6 +40,20 @@ struct filink
         pthread_cleanup_push((void (*)())pthread_mutex_unlock, (void *)&mutex);
 
 #define filink_pop_lock() pthread_cleanup_pop(1);
+
+static uint32_t filink_status_to_proto(uint32_t status)
+{
+    uint32_t ret = 0;
+    if (status & FSTATUS_READY4SYNC)    ret |= FPROTO_STATUS_READY4SYNC;
+    return ret;
+}
+
+static uint32_t filink_status_from_proto(uint32_t status)
+{
+    uint32_t ret = 0;
+    if (status & FPROTO_STATUS_READY4SYNC)    ret |= FSTATUS_READY4SYNC;
+    return ret;
+}
 
 static bool filink_add_node(filink_t *ilink, fnet_client_t *pclient, fuuid_t const *uuid)
 {
@@ -96,14 +111,53 @@ static void filink_remove_node(filink_t *ilink, fnet_client_t *pclient)
     filink_pop_lock();
 }
 
-void filink_node_status_handler(filink_t *ilink, fuuid_t const *uuid, uint32_t status)
+static void filink_broadcast_message(filink_t *ilink, fproto_msg_t msg, void const *data)
 {
-    // TODO
+    uint32_t failed_connections_num = 0;
+    fnet_client_t *failed_connections[FILINK_MAX_ALLOWED_CONNECTIONS_NUM] = { 0 };
+
+    filink_push_lock(ilink->nodes_mutex);
+    for(size_t i = 0; i < ilink->nodes_num; ++i)
+    {
+        if (ilink->nodes[i].transport && !fproto_send(ilink->nodes[i].transport, msg, (uint8_t const *)data))
+            failed_connections[failed_connections_num++] = ilink->nodes[i].transport;
+    }
+    filink_pop_lock();
+
+    for (uint32_t i = 0; i < failed_connections_num; ++i)
+        filink_remove_node(ilink, failed_connections[i]);
+}
+
+static void filink_status_handler(filink_t *ilink, uint32_t msg_type, fmsg_node_status_t const *msg, uint32_t size)
+{
+    (void)size;
+    if (memcmp(&msg->uuid, &ilink->uuid, sizeof ilink->uuid) != 0)
+        return;
+    fproto_node_status_t const pmsg = { msg->uuid,  filink_status_to_proto(msg->status) };
+    filink_broadcast_message(ilink, FPROTO_NODE_STATUS, &pmsg);
+}
+
+static void filink_msgbus_retain(filink_t *ilink, fmsgbus_t *pmsgbus)
+{
+    ilink->msgbus = fmsgbus_retain(pmsgbus);
+    fmsgbus_subscribe(ilink->msgbus, FNODE_STATUS, (fmsg_handler_t)filink_status_handler, ilink);
+}
+
+static void filink_msgbus_release(filink_t *ilink)
+{
+    fmsgbus_unsubscribe(ilink->msgbus, FNODE_STATUS, (fmsg_handler_t)filink_status_handler);
+    fmsgbus_release(ilink->msgbus);
+}
+
+void fproto_node_status_handler(filink_t *ilink, fuuid_t const *uuid, uint32_t status)
+{
+    fmsg_node_status_t const msg = { *uuid,  filink_status_from_proto(status) };
+    fmsgbus_publish(ilink->msgbus, FNODE_STATUS, &msg, sizeof msg);
 }
 
 static void filink_clients_accepter(fnet_server_t const *pserver, fnet_client_t *pclient)
 {
-    filink_t *ilink = (filink_t *)fnet_server_get_userdata(pserver);
+    filink_t *ilink = (filink_t *)fnet_server_get_param(pserver);
 
     if (pclient)
     {
@@ -199,10 +253,10 @@ filink_t *filink_bind(fmsgbus_t *pmsgbus, char const *addr, fuuid_t const *uuid)
 
     ilink->uuid = *uuid;
 
-    ilink->proto_handlers.user_data = ilink;
-    ilink->proto_handlers.node_status_handler = (fproto_node_status_handler_t)filink_node_status_handler;
+    filink_msgbus_retain(ilink, pmsgbus);
 
-    ilink->msgbus = fmsgbus_retain(pmsgbus);
+    ilink->proto_handlers.param = ilink;
+    ilink->proto_handlers.node_status_handler = (fproto_node_status_handler_t)fproto_node_status_handler;
 
     ilink->server = fnet_bind(FNET_SSL, addr, filink_clients_accepter);
     if (!ilink->server)
@@ -212,7 +266,7 @@ filink_t *filink_bind(fmsgbus_t *pmsgbus, char const *addr, fuuid_t const *uuid)
         return 0;
     }
 
-    fnet_server_set_userdata(ilink->server, ilink);
+    fnet_server_set_param(ilink->server, ilink);
 
     ilink->nodes_num = 0;
 
@@ -222,7 +276,7 @@ filink_t *filink_bind(fmsgbus_t *pmsgbus, char const *addr, fuuid_t const *uuid)
     int rc = pthread_create(&ilink->thread, 0, filink_thread, (void*)ilink);
     if (rc)
     {
-        FS_ERR("Unable to create the thread for clints processing. Error: %d", rc);
+        FS_ERR("Unable to create the thread for clients processing. Error: %d", rc);
         filink_unbind(ilink);
         return 0;
     }
@@ -253,7 +307,7 @@ void filink_unbind(filink_t *ilink)
                 fnet_disconnect(ilink->nodes[i].transport);
         }
 
-        fmsgbus_release(ilink->msgbus);
+        filink_msgbus_release(ilink);
 
         free(ilink);
     }

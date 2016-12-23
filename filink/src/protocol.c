@@ -83,22 +83,35 @@ bool fproto_send(fnet_client_t *client, fproto_msg_t msg, uint8_t const *data)
         return false;
     }
 
+    bool ret;
     uint32_t const cmd = msg;
-    if (!fmarshal_u32(client, cmd))
+
+    if (!fnet_acquire(client))
         return false;
 
-    for(fproto_field_desc_t const* desc = fproto_messages[msg];
-        desc->type != FPROTO_FIELD_NULL;
-        ++desc)
+    do
     {
-        if (!fproto_marshal(client, desc, data + desc->offset))
-            return false;
-    }
+        ret = false;
 
-    return true;
+        if (!fmarshal_u32(client, cmd))
+            break;
+
+        fproto_field_desc_t const* desc = fproto_messages[msg];
+        for(; desc->type != FPROTO_FIELD_NULL; ++desc)
+        {
+            if (!fproto_marshal(client, desc, data + desc->offset))
+                break;
+        }
+
+        ret = desc->type == FPROTO_FIELD_NULL;
+    } while(0);
+
+    fnet_release(client);
+
+    return ret;
 }
 
-bool fproto_recv(fnet_client_t *client, fproto_msg_t msg, uint8_t *data)
+static bool fproto_recv(fnet_client_t *client, fproto_msg_t msg, uint8_t *data)
 {
     if (msg < 0 || msg > sizeof fproto_messages / sizeof *fproto_messages)
     {
@@ -128,14 +141,12 @@ bool fproto_client_handshake_request(fnet_client_t *client, fuuid_t const *uuid,
         FPROTO_VERSION
     };
 
-    if (!fnet_acquire(client)) return false;
     do
     {
         ret = false;
         if (!fproto_send(client, FPROTO_HELLO, (uint8_t const *)&req)) break;
         ret = true;
     } while(0);
-    fnet_release(client);
     if (!ret) return false;
 
     // II. Read response
@@ -188,28 +199,13 @@ bool fproto_client_handshake_response(fnet_client_t *client, fuuid_t const *uuid
         FPROTO_VERSION
     };
 
-    if (!fnet_acquire(client)) return false;
     do
     {
         ret = false;
         if (!fproto_send(client, FPROTO_HELLO, (uint8_t const *)&res)) break;
         ret = true;
     } while(0);
-    fnet_release(client);
 
-    return ret;
-}
-
-bool fproto_notify_node_status(fnet_client_t *client, fuuid_t const *uuid, uint32_t status)
-{
-    fproto_node_status_t const msg =
-    {
-        *uuid,
-        status
-    };
-    if (!fnet_acquire(client)) return false;
-    bool ret = fproto_send(client, FPROTO_NODE_STATUS, (uint8_t const *)&msg);
-    fnet_release(client);
     return ret;
 }
 
@@ -230,7 +226,7 @@ bool fproto_read_message(fnet_client_t *client, fproto_msg_handlers_t *handlers)
                 fproto_node_status_t req;
                 if (!fproto_recv(client, (fproto_msg_t)msg, (uint8_t *)&req)) break;
                 if (handlers->node_status_handler)
-                    handlers->node_status_handler(handlers->user_data, &req.uuid, req.status);
+                    handlers->node_status_handler(handlers->param, &req.uuid, req.status);
                 ret = true;
                 break;
             }

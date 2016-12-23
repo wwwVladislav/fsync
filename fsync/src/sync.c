@@ -4,6 +4,7 @@
 #include <futils/log.h>
 #include <futils/queue.h>
 #include <futils/static_allocator.h>
+#include <messages.h>
 #define RSYNC_NO_STDIO_INTERFACE
 #include <librsync.h>
 #include <stdlib.h>
@@ -92,6 +93,29 @@ static void fsync_remove_file_from_list(fsync_t *psync, size_t idx)
     for(++idx; idx < psync->files_list_size; ++idx)
         psync->files_list[idx - 1] = psync->files_list[idx];
     psync->files_list[psync->files_list_size--] = 0;
+}
+
+static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_status_t const *msg, uint32_t size)
+{
+    if (memcmp(&msg->uuid, &psync->uuid, sizeof psync->uuid) != 0)
+    {
+        // Another node wants to sync folders
+        FS_INFO("UUID %llx%llx is ready for sync", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
+
+        // TODO: start synchronization
+    }
+}
+
+static void fsync_msgbus_retain(fsync_t *psync, fmsgbus_t *pmsgbus)
+{
+    psync->msgbus = fmsgbus_retain(pmsgbus);
+    fmsgbus_subscribe(psync->msgbus, FNODE_STATUS, (fmsg_handler_t)fsync_status_handler, psync);
+}
+
+static void fsync_msgbus_release(fsync_t *psync)
+{
+    fmsgbus_unsubscribe(psync->msgbus, FNODE_STATUS, (fmsg_handler_t)fsync_status_handler);
+    fmsgbus_release(psync->msgbus);
 }
 
 static void *fsync_thread(void *param)
@@ -184,7 +208,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
 
     psync->uuid = *uuid;
 
-    psync->msgbus = fmsgbus_retain(pmsgbus);
+    fsync_msgbus_retain(psync, pmsgbus);
 
     if (fstatic_allocator_create(psync->fla_buf, sizeof psync->fla_buf, sizeof(fsdir_event_t), &psync->files_list_allocator) != FSUCCESS)
     {
@@ -238,6 +262,10 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
     while(!psync->is_active)
         nanosleep(&ts, NULL);
 
+    fmsg_node_status_t const status = { *uuid, FSTATUS_READY4SYNC };
+    if (fmsgbus_publish(psync->msgbus, FNODE_STATUS, &status, sizeof status) != FSUCCESS)
+        FS_ERR("Node status not published");
+
     return psync;
 }
 
@@ -255,7 +283,7 @@ void fsync_free(fsync_t *psync)
         fring_queue_free(psync->events_queue);
         fstatic_allocator_delete(psync->files_list_allocator);
         sem_destroy(&psync->events_sem);
-        fmsgbus_release(psync->msgbus);
+        fsync_msgbus_release(psync);
         free(psync);
     }
 }

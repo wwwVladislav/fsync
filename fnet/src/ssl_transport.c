@@ -21,7 +21,7 @@ struct fnet_ssl_server
 {
     fnet_tcp_server_t  *tcp_server;
     fnet_ssl_accepter_t accepter;
-    void               *user_data;
+    void               *param;
 };
 
 typedef struct
@@ -32,9 +32,9 @@ typedef struct
 
 static fnet_ssl_module_t fnet_ssl_module = { 0 };
 
-static int fnet_pem_password_cb(char *buf, int size, int rwflag, void *userdata)
+static int fnet_pem_password_cb(char *buf, int size, int rwflag, void *param)
 {
-    (void)userdata;
+    (void)param;
     (void)rwflag;
     strncpy(buf, FNET_DEFAULT_PASSWORD, size);
     buf[size - 1] = '\0';
@@ -271,7 +271,7 @@ static void fnet_tcp_clients_accepter(fnet_tcp_server_t const *tcp_server, fnet_
                 break;
             }
 
-            fnet_ssl_server_t *pserver = (fnet_ssl_server_t *)fnet_tcp_server_get_userdata(tcp_server);
+            fnet_ssl_server_t *pserver = (fnet_ssl_server_t *)fnet_tcp_server_get_param(tcp_server);
             pserver->accepter(pserver, pclient);
             pclient = 0;
         }
@@ -312,7 +312,7 @@ fnet_ssl_server_t *fnet_ssl_bind(char const *addr, fnet_ssl_accepter_t accepter)
         return 0;
     }
 
-    fnet_tcp_server_set_userdata(pserver->tcp_server, pserver);
+    fnet_tcp_server_set_param(pserver->tcp_server, pserver);
 
     return pserver;
 }
@@ -329,14 +329,14 @@ void fnet_ssl_unbind(fnet_ssl_server_t *pserver)
     else FS_ERR("Invalid argument");
 }
 
-void fnet_ssl_server_set_userdata(fnet_ssl_server_t *pserver, void *pdata)
+void fnet_ssl_server_set_param(fnet_ssl_server_t *pserver, void *param)
 {
-    pserver->user_data = pdata;
+    pserver->param = param;
 }
 
-void *fnet_ssl_server_get_userdata(fnet_ssl_server_t const *pserver)
+void *fnet_ssl_server_get_param(fnet_ssl_server_t const *pserver)
 {
-    return pserver->user_data;
+    return pserver->param;
 }
 
 fnet_tcp_client_t *fnet_ssl_get_transport(fnet_ssl_client_t *pclient)

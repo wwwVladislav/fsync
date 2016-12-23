@@ -18,8 +18,8 @@ fnet_client_t      *fnet_connect(fnet_transport_t transport, char const *addr);
 void                fnet_disconnect(fnet_client_t *);
 fnet_server_t      *fnet_bind(fnet_transport_t transport, char const *addr, fnet_accepter_t accepter);
 void                fnet_unbind(fnet_server_t *);
-void                fnet_server_set_userdata(fnet_server_t *, void *);
-void               *fnet_server_get_userdata(fnet_server_t const *);
+void                fnet_server_set_param(fnet_server_t *, void *);
+void               *fnet_server_get_param(fnet_server_t const *);
 fnet_wait_handler_t fnet_wait_handler();
 void                fnet_wait_cancel(fnet_wait_handler_t);
 bool                fnet_select(fnet_client_t **clients,

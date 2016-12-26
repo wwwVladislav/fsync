@@ -34,6 +34,7 @@ struct fsync
     volatile bool        is_active;
 
     fuuid_t              uuid;
+    char                 dir[FSMAX_PATH];
 
     sem_t                events_sem;                                                                         // semaphore for events waiting
     fring_queue_t       *events_queue;                                                                       // events queue
@@ -103,6 +104,19 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
         FS_INFO("UUID %llx%llx is ready for sync", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
 
         // TODO: start synchronization
+        fsiterator_t *it = fsdir_iterator(psync->dir);
+        char path[FSMAX_PATH];
+        for(dirent_t entry; fsdir_iterator_next(it, &entry); )
+        {
+            fsdir_iterator_directory(it, path, sizeof path);
+            if (entry.type == FS_DIR)
+                printf("[%d] %s\n", entry.type, path);
+            else if (strlen(path))
+                printf("[%d] %s\\%s\n", entry.type, path, entry.name);
+            else
+                printf("[%d] %s\n", entry.type, entry.name);
+        }
+        fsdir_iterator_free(it);
     }
 }
 
@@ -207,6 +221,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
     memset(psync, 0, sizeof *psync);
 
     psync->uuid = *uuid;
+    strncpy(psync->dir, dir, sizeof psync->dir);
 
     fsync_msgbus_retain(psync, pmsgbus);
 

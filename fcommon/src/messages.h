@@ -4,7 +4,7 @@
 
 typedef enum
 {
-    FNODE_STATUS = 0,
+    FNODE_STATUS = 1,
     FSYNC_FILES_LIST,
 } fmessage_t;
 

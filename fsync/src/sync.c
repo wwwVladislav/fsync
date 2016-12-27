@@ -91,15 +91,39 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
     }
 }
 
+static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fmsg_sync_files_list_t const *msg, uint32_t size)
+{
+    if (memcmp(&msg->uuid, &psync->uuid, sizeof psync->uuid) != 0)
+    {
+        FS_INFO("UUID %llx%llx sent files list for synchronization", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
+
+        for(uint32_t i = 0; i < msg->files_num; ++i)
+        {
+            ffile_info_t info = { 0 };
+            info.digest = msg->files[i].digest;
+            memcpy(info.path, msg->files[i].path, sizeof msg->files[i].path);
+            fdb_sync_file_add(&msg->uuid, &info);
+        }
+
+        if (msg->is_last)
+        {
+            FS_INFO("Request files from UUID %llx%llx", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
+            // TODO
+        }
+    }
+}
+
 static void fsync_msgbus_retain(fsync_t *psync, fmsgbus_t *pmsgbus)
 {
     psync->msgbus = fmsgbus_retain(pmsgbus);
-    fmsgbus_subscribe(psync->msgbus, FNODE_STATUS, (fmsg_handler_t)fsync_status_handler, psync);
+    fmsgbus_subscribe(psync->msgbus, FNODE_STATUS,     (fmsg_handler_t)fsync_status_handler, psync);
+    fmsgbus_subscribe(psync->msgbus, FSYNC_FILES_LIST, (fmsg_handler_t)fsync_sync_files_list_handler, psync);
 }
 
 static void fsync_msgbus_release(fsync_t *psync)
 {
-    fmsgbus_unsubscribe(psync->msgbus, FNODE_STATUS, (fmsg_handler_t)fsync_status_handler);
+    fmsgbus_unsubscribe(psync->msgbus, FNODE_STATUS,     (fmsg_handler_t)fsync_status_handler);
+    fmsgbus_unsubscribe(psync->msgbus, FSYNC_FILES_LIST, (fmsg_handler_t)fsync_sync_files_list_handler);
     fmsgbus_release(psync->msgbus);
 }
 

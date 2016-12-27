@@ -1,8 +1,9 @@
 #include "protocol.h"
 #include <futils/log.h>
+#include <fnet/marshaller.h>
 #include <string.h>
 #include <stddef.h>
-#include <fnet/marshaller.h>
+#include <stdlib.h>
 
 typedef enum
 {
@@ -11,14 +12,17 @@ typedef enum
     FPROTO_FIELD_UINT16,
     FPROTO_FIELD_UINT32,
     FPROTO_FIELD_BOOL,
-    FPROTO_FIELD_UUID
+    FPROTO_FIELD_UUID,
+    FPROTO_FIELD_STRING,
+    FPROTO_FIELD_STRUCT
 } fproto_field_t;
 
-typedef struct
+typedef struct fproto_field_desc
 {
-    fproto_field_t type;
-    size_t         offset;
-    size_t         size;
+    fproto_field_t            type;
+    size_t                    offset;
+    int                       number;
+    struct fproto_field_desc const *struct_desc;
 } fproto_field_desc_t;
 
 #define FPROTO_DESC_TABLE_NAME(msg_type) fproto_##msg_type##_desc
@@ -26,52 +30,286 @@ typedef struct
 
 FPROTO_DESC_TABLE(FPROTO_HELLO)
 {
-    { FPROTO_FIELD_UUID,   offsetof(fproto_hello_t, uuid),          sizeof(fuuid_t) },
-    { FPROTO_FIELD_UINT32, offsetof(fproto_hello_t, version),       sizeof(uint32_t) },
-    { FPROTO_FIELD_NULL,   0,                                       0 }
+    { FPROTO_FIELD_UUID,   offsetof(fproto_hello_t, uuid),                  1 },
+    { FPROTO_FIELD_UINT32, offsetof(fproto_hello_t, version),               1 },
+    { FPROTO_FIELD_NULL,   0,                                               0 }
 };
 
 FPROTO_DESC_TABLE(FPROTO_NODE_STATUS)
 {
-    { FPROTO_FIELD_UUID,   offsetof(fproto_node_status_t, uuid),    sizeof(fuuid_t) },
-    { FPROTO_FIELD_UINT32, offsetof(fproto_node_status_t, status),  sizeof(uint32_t) },
-    { FPROTO_FIELD_NULL,   0,                                       0 }
+    { FPROTO_FIELD_UUID,   offsetof(fproto_node_status_t, uuid),            1 },
+    { FPROTO_FIELD_UINT32, offsetof(fproto_node_status_t, status),          1 },
+    { FPROTO_FIELD_NULL,   0,                                               0 }
+};
+
+FPROTO_DESC_TABLE(FPROTO_SYNC_FILE_INFO)
+{
+    { FPROTO_FIELD_STRING, offsetof(fproto_sync_file_info_t, path),         FPROTO_MAX_PATH },
+    { FPROTO_FIELD_UINT8,  offsetof(fproto_sync_file_info_t, digest),       sizeof(fmd5_t) },
+    { FPROTO_FIELD_NULL,   0,                                               0 }
+};
+
+FPROTO_DESC_TABLE(FPROTO_SYNC_FILES_LIST)
+{
+    { FPROTO_FIELD_UUID,   offsetof(fproto_sync_files_list_t, uuid),        1 },
+    { FPROTO_FIELD_BOOL,   offsetof(fproto_sync_files_list_t, is_last),     1 },
+    { FPROTO_FIELD_UINT8,  offsetof(fproto_sync_files_list_t, files_num),   1 },
+    { FPROTO_FIELD_STRUCT, offsetof(fproto_sync_files_list_t, files),       -2, FPROTO_DESC_TABLE_NAME(FPROTO_SYNC_FILE_INFO) },
+    { FPROTO_FIELD_NULL,   0,                                               0 }
 };
 
 static fproto_field_desc_t const* fproto_messages[] =
 {
     FPROTO_DESC_TABLE_NAME(FPROTO_HELLO),
-    FPROTO_DESC_TABLE_NAME(FPROTO_NODE_STATUS)
+    FPROTO_DESC_TABLE_NAME(FPROTO_NODE_STATUS),
+    FPROTO_DESC_TABLE_NAME(FPROTO_SYNC_FILES_LIST)
 };
 
-static bool fproto_marshal(fnet_client_t *client, fproto_field_desc_t const* field_desc, void const *ptr)
+static uint8_t const *fproto_marshal_struct(fnet_client_t *, fproto_field_desc_t const*, uint8_t const *);
+static uint8_t *fproto_unmarshal_struct(fnet_client_t *, fproto_field_desc_t const*, uint8_t *);
+
+static uint8_t const *fproto_marshal(fnet_client_t *client, fproto_field_t type, uint32_t number, fproto_field_desc_t const* desc, void const *ptr)
 {
-    switch(field_desc->type)
+    switch(type)
     {
-        case FPROTO_FIELD_UINT8:    return fmarshal_u8(client,   *(uint8_t const *)ptr);
-        case FPROTO_FIELD_UINT16:   return fmarshal_u16(client,  *(uint16_t const *)ptr);
-        case FPROTO_FIELD_UINT32:   return fmarshal_u32(client,  *(uint32_t const *)ptr);
-        case FPROTO_FIELD_BOOL:     return fmarshal_bool(client, *(bool const *)ptr);
-        case FPROTO_FIELD_UUID:     return fmarshal_uuid(client,  (fuuid_t const *)ptr);
+        case FPROTO_FIELD_UINT8:
+        {
+            uint8_t const *arr = (uint8_t const *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!fmarshal_u8(client, arr[i]))
+                    return 0;
+            }
+            return arr + number;
+        }
+
+        case FPROTO_FIELD_UINT16:
+        {
+            uint16_t const *arr = (uint16_t const *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!fmarshal_u16(client, arr[i]))
+                    return 0;
+            }
+            return (uint8_t const *)(arr + number);
+        }
+
+        case FPROTO_FIELD_UINT32:
+        {
+            uint32_t const *arr = (uint32_t const *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!fmarshal_u32(client, arr[i]))
+                    return 0;
+            }
+            return (uint8_t const *)(arr + number);
+        }
+
+        case FPROTO_FIELD_BOOL:
+        {
+            bool const *arr = (bool const *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!fmarshal_bool(client, arr[i]))
+                    return 0;
+            }
+            return (uint8_t const *)(arr + number);
+        }
+
+        case FPROTO_FIELD_UUID:
+        {
+            fuuid_t const *arr = (fuuid_t const *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!fmarshal_uuid(client, &arr[i]))
+                    return 0;
+            }
+            return (uint8_t const *)(arr + number);
+        }
+
+        case FPROTO_FIELD_STRING:
+        {
+            char const *str = (char const *)ptr;
+            uint32_t const len = strlen(str);
+            if (!fmarshal_u32(client, len))
+                return 0;
+            if (!fmarshal(client, (uint8_t const *)str, len))
+                return 0;
+            return (uint8_t const *)(str + number);
+        }
+
+        case FPROTO_FIELD_STRUCT:
+        {
+            uint8_t const *next = ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                next = fproto_marshal_struct(client, desc, next);
+                if (!next)
+                    break;
+            }
+            return next;
+        }
+
         default:
             break;
     }
-    return false;
+    return 0;
 }
 
-static bool fproto_unmarshal(fnet_client_t *client, fproto_field_desc_t const* field_desc, void *ptr)
+static uint8_t const *fproto_marshal_struct(fnet_client_t *client, fproto_field_desc_t const* desc, uint8_t const *ptr)
 {
-    switch(field_desc->type)
+    uint8_t const *next = 0;
+    fproto_field_desc_t const *field = desc;
+
+    for(; field->type != FPROTO_FIELD_NULL; ++field)
     {
-        case FPROTO_FIELD_UINT8:    return funmarshal_u8(client,   (uint8_t *)ptr);
-        case FPROTO_FIELD_UINT16:   return funmarshal_u16(client,  (uint16_t *)ptr);
-        case FPROTO_FIELD_UINT32:   return funmarshal_u32(client,  (uint32_t *)ptr);
-        case FPROTO_FIELD_BOOL:     return funmarshal_bool(client, (bool *)ptr);
-        case FPROTO_FIELD_UUID:     return funmarshal_uuid(client, (fuuid_t *)ptr);
+        uint32_t number = 1;
+        if (field->number > 0)
+            number = field->number;
+        else
+        {
+            fproto_field_desc_t const* size_desc = desc + abs(field->number);
+            if (size_desc->type == FPROTO_FIELD_UINT8)
+                number = *(uint8_t*)(ptr + size_desc->offset);
+            else if (size_desc->type == FPROTO_FIELD_UINT16)
+                number = *(uint16_t*)(ptr + size_desc->offset);
+            else if (size_desc->type == FPROTO_FIELD_UINT32)
+                number = *(uint32_t*)(ptr + size_desc->offset);
+            else
+            {
+                FS_ERR("Invalid size reference");
+                break;
+            }
+        }
+        next = fproto_marshal(client, field->type, number, field->struct_desc, ptr + field->offset);
+        if (!next)
+            return 0;
+    }
+
+    return next;
+}
+
+static uint8_t *fproto_unmarshal(fnet_client_t *client, fproto_field_t type, uint32_t number, fproto_field_desc_t const* desc, void *ptr)
+{
+    switch(type)
+    {
+        case FPROTO_FIELD_UINT8:
+        {
+            uint8_t *arr = (uint8_t *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!funmarshal_u8(client, arr + i))
+                    return 0;
+            }
+            return arr + number;
+        }
+
+        case FPROTO_FIELD_UINT16:
+        {
+            uint16_t *arr = (uint16_t *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!funmarshal_u16(client, arr + i))
+                    return 0;
+            }
+            return (uint8_t *)(arr + number);
+        }
+
+        case FPROTO_FIELD_UINT32:
+        {
+            uint32_t *arr = (uint32_t *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!funmarshal_u32(client, arr + i))
+                    return 0;
+            }
+            return (uint8_t *)(arr + number);
+        }
+
+        case FPROTO_FIELD_BOOL:
+        {
+            bool *arr = (bool *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!funmarshal_bool(client, arr + i))
+                    return 0;
+            }
+            return (uint8_t *)(arr + number);
+        }
+
+        case FPROTO_FIELD_UUID:
+        {
+            fuuid_t *arr = (fuuid_t *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!funmarshal_uuid(client, arr + i))
+                    return 0;
+            }
+            return (uint8_t *)(arr + number);
+        }
+
+        case FPROTO_FIELD_STRING:
+        {
+            char *str = (char *)ptr;
+            uint32_t len = 0;
+            if (!funmarshal_u32(client, &len))
+                return 0;
+            if (!funmarshal(client, (uint8_t*)str, len))
+                return 0;
+            if (len < number)
+                str[len] = 0;
+            return (uint8_t *)(str + number);
+        }
+
+        case FPROTO_FIELD_STRUCT:
+        {
+            uint8_t *next = ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                next = fproto_unmarshal_struct(client, desc, next);
+                if (!next)
+                    break;
+            }
+            return next;
+        }
+
         default:
             break;
     }
-    return false;
+    return 0;
+}
+
+static uint8_t *fproto_unmarshal_struct(fnet_client_t *client, fproto_field_desc_t const* desc, uint8_t *ptr)
+{
+    uint8_t *next = 0;
+    fproto_field_desc_t const *field = desc;
+
+    for(; field->type != FPROTO_FIELD_NULL; ++field)
+    {
+        uint32_t number = 1;
+        if (field->number > 0)
+            number = field->number;
+        else
+        {
+            fproto_field_desc_t const* size_desc = desc + abs(field->number);
+            if (size_desc->type == FPROTO_FIELD_UINT8)
+                number = *(uint8_t*)(ptr + size_desc->offset);
+            else if (size_desc->type == FPROTO_FIELD_UINT16)
+                number = *(uint16_t*)(ptr + size_desc->offset);
+            else if (size_desc->type == FPROTO_FIELD_UINT32)
+                number = *(uint32_t*)(ptr + size_desc->offset);
+            else
+            {
+                FS_ERR("Invalid size reference");
+                break;
+            }
+        }
+        next = fproto_unmarshal(client, field->type, number, field->struct_desc, ptr + field->offset);
+        if (!next)
+            return 0;
+    }
+
+    return next;
 }
 
 // TODO: marshal/unmarshal messages into the stream for performance purposes.
@@ -96,14 +334,7 @@ bool fproto_send(fnet_client_t *client, fproto_msg_t msg, uint8_t const *data)
         if (!fmarshal_u32(client, cmd))
             break;
 
-        fproto_field_desc_t const* desc = fproto_messages[msg];
-        for(; desc->type != FPROTO_FIELD_NULL; ++desc)
-        {
-            if (!fproto_marshal(client, desc, data + desc->offset))
-                break;
-        }
-
-        ret = desc->type == FPROTO_FIELD_NULL;
+        ret = fproto_marshal_struct(client, fproto_messages[msg], data) != 0;
     } while(0);
 
     fnet_release(client);
@@ -119,15 +350,7 @@ static bool fproto_recv(fnet_client_t *client, fproto_msg_t msg, uint8_t *data)
         return false;
     }
 
-    for(fproto_field_desc_t const* desc = fproto_messages[msg];
-        desc->type != FPROTO_FIELD_NULL;
-        ++desc)
-    {
-        if (!fproto_unmarshal(client, desc, data + desc->offset))
-            return false;
-    }
-
-    return true;
+    return fproto_unmarshal_struct(client, fproto_messages[msg], data) != 0;
 }
 
 bool fproto_client_handshake_request(fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid)
@@ -227,6 +450,16 @@ bool fproto_read_message(fnet_client_t *client, fproto_msg_handlers_t *handlers)
                 if (!fproto_recv(client, (fproto_msg_t)msg, (uint8_t *)&req)) break;
                 if (handlers->node_status_handler)
                     handlers->node_status_handler(handlers->param, &req.uuid, req.status);
+                ret = true;
+                break;
+            }
+
+            case FPROTO_SYNC_FILES_LIST:
+            {
+                fproto_sync_files_list_t req;
+                if (!fproto_recv(client, (fproto_msg_t)msg, (uint8_t *)&req)) break;
+                if (handlers->sync_files_list_handler)
+                    handlers->sync_files_list_handler(handlers->param, &req.uuid, req.is_last, req.files_num, req.files);
                 ret = true;
                 break;
             }

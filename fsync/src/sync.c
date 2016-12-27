@@ -1,6 +1,7 @@
 #include "sync.h"
 #include "fsutils.h"
 #include "config.h"
+#include <fdb/sync/files.h>
 #include <futils/log.h>
 #include <futils/queue.h>
 #include <futils/static_allocator.h>
@@ -14,20 +15,13 @@
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
+#include <stdio.h>
 
 enum
 {
-    FSYNC_INBUF_SIZE        = 32 * 1024,
-    FSYNC_SIGBUF_SIZE       = 16 * 1024,
-    FSYNC_FILES_LIST_SIZE   = 512,
+    FSYNC_FILES_LIST_SIZE   = 1000,                     // Max number of files for sync
     FSYNC_QUEUEBUF_SIZE     = 256 * 1024
 };
-
-typedef struct
-{
-    char    path[FSMAX_PATH + 1];
-    time_t  modification_time;
-} fchanged_file_t;
 
 struct fsync
 {
@@ -40,30 +34,12 @@ struct fsync
     fring_queue_t       *events_queue;                                                                       // events queue
     char                 queue_buf[FSYNC_QUEUEBUF_SIZE];                                                     // buffer for file events queue
 
-    char                 fla_buf[FSTATIC_ALLOCATOR_MEM_NEED(FSYNC_FILES_LIST_SIZE, sizeof(fchanged_file_t))];// buffer for files list allocator
-    fstatic_allocator_t *files_list_allocator;                                                               // files list allocator
-    fchanged_file_t     *files_list[FSYNC_FILES_LIST_SIZE];                                                  // TODO: use prefix tree
-    size_t               files_list_size;                                                                    // files list size
-
     pthread_t            thread;
     fsdir_listener_t    *dir_listener;
     time_t               sync_time;
 
     fmsgbus_t           *msgbus;
 };
-
-static int fsdir_compare(const void *pa, const void *pb)
-{
-    fchanged_file_t const *lhs = *(fchanged_file_t const **)pa;
-    fchanged_file_t const *rhs = *(fchanged_file_t const **)pb;
-
-#   ifdef _WIN32
-    // TODO: for windows paths must be compared in lower case
-    return strncmp(lhs->path, rhs->path, sizeof rhs->path);
-#   else
-    return strncmp(lhs->path, rhs->path, sizeof rhs->path);
-#   endif
-}
 
 static void fsdir_evt_handler(fsdir_event_t const *event, void *arg)
 {
@@ -74,28 +50,6 @@ static void fsdir_evt_handler(fsdir_event_t const *event, void *arg)
         FS_WARN("Unable to push the file system event into the queue");
 }
 
-static void fsync_add_file2list(fsync_t *psync, fchanged_file_t const *file)
-{
-    fchanged_file_t *changed_file = (fchanged_file_t *)fstatic_alloc(psync->files_list_allocator);
-
-    if (changed_file)
-    {
-        memcpy(changed_file, file, sizeof *file);
-        psync->files_list[psync->files_list_size++] = changed_file;
-        qsort(psync->files_list, psync->files_list_size, sizeof(fchanged_file_t*), fsdir_compare);
-    }
-    else
-        FS_WARN("Unable to allocate memory for changed file name");
-}
-
-static void fsync_remove_file_from_list(fsync_t *psync, size_t idx)
-{
-    fstatic_free(psync->files_list_allocator, psync->files_list[idx]);
-    for(++idx; idx < psync->files_list_size; ++idx)
-        psync->files_list[idx - 1] = psync->files_list[idx];
-    psync->files_list[psync->files_list_size--] = 0;
-}
-
 static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_status_t const *msg, uint32_t size)
 {
     if (memcmp(&msg->uuid, &psync->uuid, sizeof psync->uuid) != 0)
@@ -103,20 +57,37 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
         // Another node wants to sync folders
         FS_INFO("UUID %llx%llx is ready for sync", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
 
-        // TODO: start synchronization
-        fsiterator_t *it = fsdir_iterator(psync->dir);
-        char path[FSMAX_PATH];
-        for(dirent_t entry; fsdir_iterator_next(it, &entry); )
+        fdb_sync_files_iterator_t *it = fdb_sync_files_iterator(&psync->uuid);
+        if (it)
         {
-            fsdir_iterator_directory(it, path, sizeof path);
-            if (entry.type == FS_DIR)
-                printf("[%d] %s\n", entry.type, path);
-            else if (strlen(path))
-                printf("[%d] %s\\%s\n", entry.type, path, entry.name);
-            else
-                printf("[%d] %s\n", entry.type, entry.name);
+            fmsg_sync_files_list_t files_list;
+            files_list.uuid = psync->uuid;
+            files_list.destination = msg->uuid;
+            files_list.is_last = false;
+            files_list.files_num = 0;
+
+            ffile_info_t info;
+            for (bool ret = fdb_sync_files_iterator_first(it, &info);
+                 psync->is_active && ret;
+                 ret = fdb_sync_files_iterator_next(it, &info))
+            {
+                fsync_file_info_t *file_info = &files_list.files[files_list.files_num];
+                memcpy(file_info->path,     info.path,   sizeof info.path);
+                memcpy(&file_info->digest, &info.digest, sizeof info.digest);
+
+                if (++files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
+                {
+                    if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
+                        FS_ERR("Files list not published");
+                    files_list.files_num = 0;
+                }
+            }
+            fdb_sync_files_iterator_free(it);
+
+            files_list.is_last = true;
+            if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
+                FS_ERR("Files list not published");
         }
-        fsdir_iterator_free(it);
     }
 }
 
@@ -153,16 +124,10 @@ static void *fsync_thread(void *param)
         // Copy data from queue into the list
         if (fring_queue_front(psync->events_queue, (void **)&event, &event_size) == FSUCCESS)
         {
-            fchanged_file_t file;
+            ffile_info_t file = { 0 };
             strncpy(file.path, event->path, sizeof file.path);
-            file.modification_time = cur_time;
-            fchanged_file_t const *pfile = &file;
-
-            fchanged_file_t *changed_file = bsearch(&pfile, psync->files_list, psync->files_list_size, sizeof(fchanged_file_t*), fsdir_compare);
-            if (!changed_file)
-                fsync_add_file2list(psync, pfile);
-            else
-                changed_file->modification_time = cur_time;
+            file.mod_time = cur_time;
+            fdb_sync_file_add(&psync->uuid, &file);
 
             if (fring_queue_pop_front(psync->events_queue) != FSUCCESS)
                 FS_WARN("Unable to pop the file system event from the queue");
@@ -171,18 +136,24 @@ static void *fsync_thread(void *param)
         // Sync changed files in tree
         if (cur_time - psync->sync_time >= FSYNC_TIMEOUT / 2)
         {
-            for(size_t i = 0; i < psync->files_list_size;)
+            fdb_sync_files_iterator_t *it = fdb_sync_files_iterator(&psync->uuid);
+            if (it)
             {
-                time_t const modification_time = psync->files_list[i]->modification_time;
-
-                if (cur_time - modification_time >= FSYNC_TIMEOUT)
+                ffile_info_t info;
+                for (bool ret = fdb_sync_files_iterator_first(it, &info);
+                     ret;
+                     ret = fdb_sync_files_iterator_next(it, &info))
                 {
-                    // TODO
-                    FS_INFO("Sync: [%d] %s", modification_time, psync->files_list[i]->path);
-                    fsync_remove_file_from_list(psync, i);
+                    if (info.sync_time < info.mod_time
+                        && cur_time - info.mod_time >= FSYNC_TIMEOUT)
+                    {
+                        // TODO
+                        FS_INFO("Sync: [%d] %s", info.mod_time, info.path);
+                        info.sync_time = cur_time;
+                        fdb_sync_file_update(&psync->uuid, &info);
+                    }
                 }
-                else
-                    ++i;
+                fdb_sync_files_iterator_free(it);
             }
 
             psync->sync_time = cur_time;
@@ -190,6 +161,32 @@ static void *fsync_thread(void *param)
     }
 
     return 0;
+}
+
+static void fsync_scan_dir(fsync_t *psync)
+{
+    fdb_sync_file_del_all(&psync->uuid);
+
+    fsiterator_t *it = fsdir_iterator(psync->dir);
+
+    for(dirent_t entry; fsdir_iterator_next(it, &entry);)
+    {
+        if (entry.type == FS_REG)
+        {
+            ffile_info_t info;
+
+            size_t len = fsdir_iterator_full_path(it, &entry, info.path, sizeof info.path);
+
+            if (len <= sizeof info.path)
+            {
+                if (fsfile_md5sum(info.path, &info.digest))
+                    fdb_sync_file_add(&psync->uuid, &info);
+            }
+            else
+                FS_ERR("Full path length of \'%s\' file is too long.", entry.name);
+        }
+    }
+    fsdir_iterator_free(it);
 }
 
 fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
@@ -221,16 +218,13 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
     memset(psync, 0, sizeof *psync);
 
     psync->uuid = *uuid;
-    strncpy(psync->dir, dir, sizeof psync->dir);
+
+    char *dst = psync->dir;
+    for(; *dir && dst - psync->dir + 1 < sizeof psync->dir; ++dst, ++dir)
+        *dst = *dir == '\\' ? '/' : *dir;
+    *dst = 0;
 
     fsync_msgbus_retain(psync, pmsgbus);
-
-    if (fstatic_allocator_create(psync->fla_buf, sizeof psync->fla_buf, sizeof(fsdir_event_t), &psync->files_list_allocator) != FSUCCESS)
-    {
-        FS_ERR("The allocator for file paths isn't created");
-        free(psync);
-        return 0;
-    }
 
     if (fring_queue_create(psync->queue_buf, sizeof psync->queue_buf, &psync->events_queue) != FSUCCESS)
     {
@@ -259,7 +253,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
         return 0;
     }
 
-    if (!fsdir_listener_add_path(psync->dir_listener, dir))
+    if (!fsdir_listener_add_path(psync->dir_listener, psync->dir))
     {
         fsync_free(psync);
         return 0;
@@ -272,6 +266,8 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
         fsync_free(psync);
         return 0;
     }
+
+    fsync_scan_dir(psync);
 
     static struct timespec const ts = { 1, 0 };
     while(!psync->is_active)
@@ -296,7 +292,6 @@ void fsync_free(fsync_t *psync)
         }
         fsdir_listener_free(psync->dir_listener);
         fring_queue_free(psync->events_queue);
-        fstatic_allocator_delete(psync->files_list_allocator);
         sem_destroy(&psync->events_sem);
         fsync_msgbus_release(psync);
         free(psync);

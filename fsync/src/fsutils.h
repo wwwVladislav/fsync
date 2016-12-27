@@ -1,6 +1,7 @@
 #ifndef FSUTILS_H_FSYNC
 #define FSUTILS_H_FSYNC
 #include "config.h"
+#include <futils/md5.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -53,10 +54,15 @@ fsiterator_t     *fsdir_iterator(char const *);
 void              fsdir_iterator_free(fsiterator_t *);
 bool              fsdir_iterator_next(fsiterator_t *, dirent_t *);
 size_t            fsdir_iterator_directory(fsiterator_t *, char *, size_t);
+size_t            fsdir_iterator_full_path(fsiterator_t *, dirent_t *, char *, size_t);
 
 fsdir_listener_t *fsdir_listener_create();
 void              fsdir_listener_free(fsdir_listener_t *listener);
 bool              fsdir_listener_add_path(fsdir_listener_t *listener, char const *path);
 bool              fsdir_listener_reg_handler(fsdir_listener_t *listener, fsdir_evt_handler_t handler, void *arg);
+
+char              fspath_delimiter(char const *path);
+
+bool              fsfile_md5sum(char const *path, fmd5_t *sum);
 
 #endif

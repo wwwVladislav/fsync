@@ -97,6 +97,7 @@ endmacro(use_c99)
 
 add_subdirectory(../libs/sqlite sqlite)
 add_subdirectory(../futils      futils)
+add_subdirectory(../fdb         fdb)
 add_subdirectory(../fsync       fsync)
 add_subdirectory(../fnet        fnet)
 add_subdirectory(../filink      filink)

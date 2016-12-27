@@ -1,6 +1,7 @@
 #ifndef MESSAGES_H_FCOMMON
 #define MESSAGES_H_FCOMMON
 #include <futils/uuid.h>
+#include <futils/md5.h>
 
 typedef enum
 {
@@ -21,22 +22,22 @@ typedef struct
 
 enum
 {
-    FMAX_PATH   = 1024,             // Max file path length
-    FDIGEST_LEN = 16                // File digest length
+    FMAX_PATH   = 1024              // Max file path length
 };
 
 typedef struct
 {
     char    path[FMAX_PATH];
-    uint8_t digest[FDIGEST_LEN];
+    fmd5_t  digest;
 } fsync_file_info_t;
 
 typedef struct
 {
     fuuid_t             uuid;
+    fuuid_t             destination;
     bool                is_last;
     uint8_t             files_num;
-    fsync_file_info_t   files[1];
+    fsync_file_info_t   files[32];
 } fmsg_sync_files_list_t;
 
 #endif

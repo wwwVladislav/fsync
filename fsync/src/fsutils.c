@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
 
 struct fsdir
 {
@@ -267,4 +268,49 @@ bool fsdir_iterator_next(fsiterator_t *piterator, dirent_t *pentry)
 size_t fsdir_iterator_directory(fsiterator_t *piterator, char *path, size_t size)
 {
     return fsget_directory_by_iterator(piterator, 0, path, size, false);
+}
+
+size_t fsdir_iterator_full_path(fsiterator_t *piterator, dirent_t *pentry, char *path, size_t size)
+{
+    return fsget_directory_by_iterator(piterator, pentry->name, path, size, true);
+}
+
+char fspath_delimiter(char const *path)
+{
+    char delimiter = '/';
+
+    if (path)
+    {
+        for(char const *ch = path; *ch; ++ch)
+        {
+            if (*ch == '\\')
+                delimiter = '\\';
+            break;
+        }
+    }
+
+    return delimiter;
+}
+
+bool fsfile_md5sum(char const *path, fmd5_t *sum)
+{
+    if (!path || !sum) return false;
+
+    fmd5_context_t md5_ctx;
+    fmd5_init(&md5_ctx);
+
+    int fd = open(path, O_RDONLY);
+    if (fd != -1)
+    {
+        uint8_t buffer[10 * 1024];
+        ssize_t size;
+        while((size = read(fd, buffer, sizeof buffer)) > 0)
+            fmd5_update(&md5_ctx, buffer, size);
+        close(fd);
+        fmd5_final(&md5_ctx, sum);
+        return true;
+    }
+    else
+        FS_ERR("Unable to open the file: \'%s\'", path);
+    return false;
 }

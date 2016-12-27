@@ -18,25 +18,29 @@ enum
 
 typedef struct
 {
-    uint32_t type;
-    uint32_t msg_type;
-    uint8_t *msg_data;
-    uint32_t msg_size;
+    uint32_t        type;
+    uint32_t        msg_type;
+    uint8_t        *msg_data;
+    uint32_t        msg_size;
 } fmsgbus_msg_t;
 
 typedef struct
 {
-    uint32_t type;
-    uint32_t msg_type;
-    fmsg_handler_t handler;
-    void *param;
+    uint32_t        type;
+    uint32_t        msg_type;
+    fmsg_handler_t  handler;
+    void           *param;
+    sem_t          *sem;
+    ferr_t         *ret;
 } fmsgbus_msg_subscribe_t;
 
 typedef struct
 {
-    uint32_t type;
-    uint32_t msg_type;
-    fmsg_handler_t handler;
+    uint32_t        type;
+    uint32_t        msg_type;
+    fmsg_handler_t  handler;
+    sem_t          *sem;
+    ferr_t         *ret;
 } fmsgbus_msg_unsubscribe_t;
 
 typedef struct
@@ -82,7 +86,7 @@ struct fmsgbus
     fmsgbus_handler_t     handlers[FMSGBUS_MAX_HANDLERS];
     pthread_mutex_t       messages_mutex;
     sem_t                 messages_sem;
-    uint8_t               buf[512 * 1024];
+    uint8_t               buf[1024 * 1024];
     fring_queue_t        *messages;
 
     fmsgbus_thread_t      threads[FMSGBUS_MAX_THREADS];
@@ -115,7 +119,7 @@ static bool fmsgbus_msg_handle(fmsgbus_t *msgbus, uint32_t msg_type, uint8_t *ms
     return false;
 }
 
-static void fmsgbus_subscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t handler, void *param)
+static ferr_t fmsgbus_subscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t handler, void *param)
 {
     int i = 0;
 
@@ -131,10 +135,15 @@ static void fmsgbus_subscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_h
     }
 
     if (i >= FMSGBUS_MAX_HANDLERS)
+    {
         FS_ERR("No free space in messages handlers table");
+        return FFAIL;
+    }
+
+    return FSUCCESS;
 }
 
-static void fmsgbus_unsubscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t handler)
+static ferr_t fmsgbus_unsubscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t handler)
 {
     int i = 0;
 
@@ -151,7 +160,12 @@ static void fmsgbus_unsubscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg
     }
 
     if (i >= FMSGBUS_MAX_HANDLERS)
+    {
         FS_ERR("Message handler not found in handlers table");
+        return FFAIL;
+    }
+
+    return FSUCCESS;
 }
 
 static void *fmsgbus_ctrl_thread(void *param)
@@ -187,7 +201,8 @@ static void *fmsgbus_ctrl_thread(void *param)
                 case FMSGBUS_SUBSCRIBE:
                 {
                     fmsgbus_msg_subscribe_t *msg = (fmsgbus_msg_subscribe_t *)data;
-                    fmsgbus_subscribe_impl(msgbus, msg->msg_type, msg->handler, msg->param);
+                    *msg->ret = fmsgbus_subscribe_impl(msgbus, msg->msg_type, msg->handler, msg->param);
+                    sem_post(msg->sem);
                     fring_queue_pop_front(msgbus->messages);
                     break;
                 }
@@ -195,7 +210,8 @@ static void *fmsgbus_ctrl_thread(void *param)
                 case FMSGBUS_UNSUBSCRIBE:
                 {
                     fmsgbus_msg_unsubscribe_t *msg = (fmsgbus_msg_unsubscribe_t *)data;
-                    fmsgbus_unsubscribe_impl(msgbus, msg->msg_type, msg->handler);
+                    *msg->ret = fmsgbus_unsubscribe_impl(msgbus, msg->msg_type, msg->handler);
+                    sem_post(msg->sem);
                     fring_queue_pop_front(msgbus->messages);
                     break;
                 }
@@ -373,13 +389,23 @@ ferr_t fmsgbus_subscribe(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t h
     }
 
     ferr_t ret;
+    sem_t  sem;
+    ferr_t result = FSUCCESS;
+
+    if (sem_init(&sem, 0, 0) == -1)
+    {
+        FS_ERR("The semaphore initialization is failed");
+        return FFAIL;
+    }
 
     fmsgbus_msg_subscribe_t const msg =
     {
         FMSGBUS_SUBSCRIBE,
         msg_type,
         handler,
-        param
+        param,
+        &sem,
+        &result
     };
 
     fmsgbus_push_lock(pmsgbus->messages_mutex);
@@ -387,7 +413,18 @@ ferr_t fmsgbus_subscribe(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t h
     fmsgbus_pop_lock();
 
     if (ret == FSUCCESS)
+    {
         sem_post(&pmsgbus->messages_sem);
+
+        // Waiting for completion
+        struct timespec tm = { time(0) + 1, 0 };
+        while(pmsgbus->ctrl_thread.is_active && sem_timedwait(&sem, &tm) == -1 && errno == EINTR)
+            continue;       // Restart if interrupted by handler
+
+        ret = result;
+    }
+
+    sem_destroy(&sem);
 
     return ret;
 }
@@ -402,12 +439,22 @@ ferr_t fmsgbus_unsubscribe(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t
     }
 
     ferr_t ret;
+    sem_t  sem;
+    ferr_t result = FSUCCESS;
+
+    if (sem_init(&sem, 0, 0) == -1)
+    {
+        FS_ERR("The semaphore initialization is failed");
+        return FFAIL;
+    }
 
     fmsgbus_msg_unsubscribe_t const msg =
     {
         FMSGBUS_UNSUBSCRIBE,
         msg_type,
-        handler
+        handler,
+        &sem,
+        &result
     };
 
     fmsgbus_push_lock(pmsgbus->messages_mutex);
@@ -415,7 +462,18 @@ ferr_t fmsgbus_unsubscribe(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t
     fmsgbus_pop_lock();
 
     if (ret == FSUCCESS)
+    {
         sem_post(&pmsgbus->messages_sem);
+
+        // Waiting for completion
+        struct timespec tm = { time(0) + 1, 0 };
+        while(pmsgbus->ctrl_thread.is_active && sem_timedwait(&sem, &tm) == -1 && errno == EINTR)
+            continue;       // Restart if interrupted by handler
+
+        ret = result;
+    }
+
+    sem_destroy(&sem);
 
     return ret;
 }

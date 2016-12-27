@@ -27,10 +27,11 @@ include_directories(
     ${LIBRSYNC_INCLUDES}
     ../futils/include
     ../fcommon/include
+    ../fdb/include
 )
 
 use_c99()
 
 add_library(fsync SHARED ${FSYNC_HEADERS} ${FSYNC_SOURCES})
-add_dependencies(fsync futils)
-target_link_libraries(fsync futils ${LIBRSYNC_LIBRARIES})
+add_dependencies(fsync futils fdb)
+target_link_libraries(fsync futils fdb ${LIBRSYNC_LIBRARIES})

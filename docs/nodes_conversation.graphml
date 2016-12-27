@@ -817,7 +817,7 @@
         <y:SplineEdge>
           <y:Path sx="0.0" sy="0.0" tx="0.0" ty="0.0"/>
           <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
+          <y:Arrows source="standard" target="standard"/>
           <y:EdgeLabel alignment="center" anchorX="-12.8304703036938" anchorY="-38.20145386950668" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" modelName="custom" preferredPlacement="anywhere" ratio="0.5" textColor="#FF0000" upX="-0.7195700973401145" upY="0.6944198117953853" visible="true" width="34.6796875" x="-50.36953643703454" y="-63.15591997960643">Hello!<y:LabelModel>
               <y:SmartEdgeLabelModel autoRotationEnabled="true" defaultAngle="0.0" defaultDistance="10.0"/>
             </y:LabelModel>
@@ -834,7 +834,7 @@
         <y:SplineEdge>
           <y:Path sx="0.0" sy="0.0" tx="0.0" ty="0.0"/>
           <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
+          <y:Arrows source="standard" target="standard"/>
           <y:EdgeLabel alignment="center" anchorX="15.128036206085426" anchorY="-15.928553485325239" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" modelName="custom" preferredPlacement="anywhere" ratio="0.5" textColor="#FF0000" upX="-0.6582030635467226" upY="-0.7528404393612959" visible="true" width="34.6796875" x="2.8188675860466184" y="-52.83382849161433">Hello!<y:LabelModel>
               <y:SmartEdgeLabelModel autoRotationEnabled="true" defaultAngle="0.0" defaultDistance="10.0"/>
             </y:LabelModel>
@@ -851,7 +851,7 @@
         <y:SplineEdge>
           <y:Path sx="0.0" sy="0.0" tx="0.0" ty="0.0"/>
           <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
+          <y:Arrows source="standard" target="standard"/>
           <y:EdgeLabel alignment="center" anchorX="19.365757027983307" anchorY="24.92059260291802" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" modelName="custom" preferredPlacement="anywhere" ratio="0.5" textColor="#FF0000" upX="0.7902221937508128" upY="-0.6128204341433573" visible="true" width="34.6796875" x="19.365757027983307" y="13.460132335490977">Hello!<y:LabelModel>
               <y:SmartEdgeLabelModel autoRotationEnabled="true" defaultAngle="0.0" defaultDistance="10.0"/>
             </y:LabelModel>
@@ -868,7 +868,7 @@
         <y:SplineEdge>
           <y:Path sx="0.0" sy="0.0" tx="0.0" ty="0.0"/>
           <y:LineStyle color="#000000" type="line" width="1.0"/>
-          <y:Arrows source="none" target="standard"/>
+          <y:Arrows source="standard" target="standard"/>
           <y:EdgeLabel alignment="center" anchorX="-33.0843621129859" anchorY="2.3047475891108604" configuration="AutoFlippingLabel" distance="2.0" fontFamily="Dialog" fontSize="12" fontStyle="plain" hasBackgroundColor="false" hasLineColor="false" height="18.701171875" modelName="custom" preferredPlacement="anywhere" ratio="0.5" textColor="#FF0000" upX="0.6588096172922017" upY="0.7523097022924154" visible="true" width="34.6796875" x="-59.1742274917049" y="2.3047475891108604">Hello!<y:LabelModel>
               <y:SmartEdgeLabelModel autoRotationEnabled="true" defaultAngle="0.0" defaultDistance="10.0"/>
             </y:LabelModel>

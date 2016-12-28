@@ -11,6 +11,7 @@ typedef enum
     FPROTO_FIELD_UINT8,
     FPROTO_FIELD_UINT16,
     FPROTO_FIELD_UINT32,
+    FPROTO_FIELD_UINT64,
     FPROTO_FIELD_BOOL,
     FPROTO_FIELD_UUID,
     FPROTO_FIELD_STRING,
@@ -30,39 +31,75 @@ typedef struct fproto_field_desc
 
 FPROTO_DESC_TABLE(FPROTO_HELLO)
 {
-    { FPROTO_FIELD_UUID,   offsetof(fproto_hello_t, uuid),                  1 },
-    { FPROTO_FIELD_UINT32, offsetof(fproto_hello_t, version),               1 },
-    { FPROTO_FIELD_NULL,   0,                                               0 }
+    { FPROTO_FIELD_UUID,   offsetof(fproto_hello_t, uuid),                      1 },
+    { FPROTO_FIELD_UINT32, offsetof(fproto_hello_t, version),                   1 },
+    { FPROTO_FIELD_NULL,   0,                                                   0 }
 };
 
 FPROTO_DESC_TABLE(FPROTO_NODE_STATUS)
 {
-    { FPROTO_FIELD_UUID,   offsetof(fproto_node_status_t, uuid),            1 },
-    { FPROTO_FIELD_UINT32, offsetof(fproto_node_status_t, status),          1 },
-    { FPROTO_FIELD_NULL,   0,                                               0 }
+    { FPROTO_FIELD_UUID,   offsetof(fproto_node_status_t, uuid),                1 },
+    { FPROTO_FIELD_UINT32, offsetof(fproto_node_status_t, status),              1 },
+    { FPROTO_FIELD_NULL,   0,                                                   0 }
 };
 
 FPROTO_DESC_TABLE(FPROTO_SYNC_FILE_INFO)
 {
-    { FPROTO_FIELD_STRING, offsetof(fproto_sync_file_info_t, path),         FPROTO_MAX_PATH },
-    { FPROTO_FIELD_UINT8,  offsetof(fproto_sync_file_info_t, digest),       sizeof(fmd5_t) },
-    { FPROTO_FIELD_NULL,   0,                                               0 }
+    { FPROTO_FIELD_STRING, offsetof(fproto_sync_file_info_t, path),             FPROTO_MAX_PATH },
+    { FPROTO_FIELD_UINT8,  offsetof(fproto_sync_file_info_t, digest),           sizeof(fmd5_t) },
+    { FPROTO_FIELD_NULL,   0,                                                   0 }
 };
 
 FPROTO_DESC_TABLE(FPROTO_SYNC_FILES_LIST)
 {
-    { FPROTO_FIELD_UUID,   offsetof(fproto_sync_files_list_t, uuid),        1 },
-    { FPROTO_FIELD_BOOL,   offsetof(fproto_sync_files_list_t, is_last),     1 },
-    { FPROTO_FIELD_UINT8,  offsetof(fproto_sync_files_list_t, files_num),   1 },
-    { FPROTO_FIELD_STRUCT, offsetof(fproto_sync_files_list_t, files),       -2, FPROTO_DESC_TABLE_NAME(FPROTO_SYNC_FILE_INFO) },
-    { FPROTO_FIELD_NULL,   0,                                               0 }
+    { FPROTO_FIELD_UUID,   offsetof(fproto_sync_files_list_t, uuid),            1 },
+    { FPROTO_FIELD_BOOL,   offsetof(fproto_sync_files_list_t, is_last),         1 },
+    { FPROTO_FIELD_UINT8,  offsetof(fproto_sync_files_list_t, files_num),       1 },
+    { FPROTO_FIELD_STRUCT, offsetof(fproto_sync_files_list_t, files),           -2, FPROTO_DESC_TABLE_NAME(FPROTO_SYNC_FILE_INFO) },
+    { FPROTO_FIELD_NULL,   0,                                                   0 }
+};
+
+FPROTO_DESC_TABLE(FPROTO_FILE_PATH)
+{
+    { FPROTO_FIELD_STRING, 0,                                                   FPROTO_MAX_PATH },
+    { FPROTO_FIELD_NULL,   0,                                                   0 }
+};
+
+FPROTO_DESC_TABLE(FPROTO_REQUEST_FILES_CONTENT)
+{
+    { FPROTO_FIELD_UUID,   offsetof(fproto_request_files_content_t, uuid),      1 },
+    { FPROTO_FIELD_UINT8,  offsetof(fproto_request_files_content_t, files_num), 1 },
+    { FPROTO_FIELD_STRUCT, offsetof(fproto_request_files_content_t, files),     -1, FPROTO_DESC_TABLE_NAME(FPROTO_FILE_PATH) },
+    { FPROTO_FIELD_NULL,   0,                                                   0 }
+};
+
+FPROTO_DESC_TABLE(FPROTO_FILE_INFO)
+{
+    { FPROTO_FIELD_UUID,   offsetof(fproto_file_info_t, uuid),                  1 },
+    { FPROTO_FIELD_STRING, offsetof(fproto_file_info_t, path),                  FPROTO_MAX_PATH },
+    { FPROTO_FIELD_UINT32, offsetof(fproto_file_info_t, id),                    1 },
+    { FPROTO_FIELD_UINT64, offsetof(fproto_file_info_t, size),                  1 },
+    { FPROTO_FIELD_NULL,   0,                                                   0 }
+};
+
+FPROTO_DESC_TABLE(FPROTO_FILE_PART)
+{
+    { FPROTO_FIELD_UUID,   offsetof(fproto_file_part_t, uuid),                  1 },
+    { FPROTO_FIELD_UINT32, offsetof(fproto_file_part_t, id),                    1 },
+    { FPROTO_FIELD_UINT16, offsetof(fproto_file_part_t, size),                  1 },
+    { FPROTO_FIELD_UINT64, offsetof(fproto_file_part_t, offset),                1 },
+    { FPROTO_FIELD_UINT8 , offsetof(fproto_file_part_t, data),                  -2 },
+    { FPROTO_FIELD_NULL,   0,                                                   0 }
 };
 
 static fproto_field_desc_t const* fproto_messages[] =
 {
     FPROTO_DESC_TABLE_NAME(FPROTO_HELLO),
     FPROTO_DESC_TABLE_NAME(FPROTO_NODE_STATUS),
-    FPROTO_DESC_TABLE_NAME(FPROTO_SYNC_FILES_LIST)
+    FPROTO_DESC_TABLE_NAME(FPROTO_SYNC_FILES_LIST),
+    FPROTO_DESC_TABLE_NAME(FPROTO_REQUEST_FILES_CONTENT),
+    FPROTO_DESC_TABLE_NAME(FPROTO_FILE_INFO),
+    FPROTO_DESC_TABLE_NAME(FPROTO_FILE_PART)
 };
 
 static uint8_t const *fproto_marshal_struct(fnet_client_t *, fproto_field_desc_t const*, uint8_t const *);
@@ -75,11 +112,8 @@ static uint8_t const *fproto_marshal(fnet_client_t *client, fproto_field_t type,
         case FPROTO_FIELD_UINT8:
         {
             uint8_t const *arr = (uint8_t const *)ptr;
-            for(uint32_t i = 0; i < number; ++i)
-            {
-                if (!fmarshal_u8(client, arr[i]))
-                    return 0;
-            }
+            if (!fmarshal(client, arr, number))
+                return 0;
             return arr + number;
         }
 
@@ -100,6 +134,17 @@ static uint8_t const *fproto_marshal(fnet_client_t *client, fproto_field_t type,
             for(uint32_t i = 0; i < number; ++i)
             {
                 if (!fmarshal_u32(client, arr[i]))
+                    return 0;
+            }
+            return (uint8_t const *)(arr + number);
+        }
+
+        case FPROTO_FIELD_UINT64:
+        {
+            uint64_t const *arr = (uint64_t const *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!fmarshal_u64(client, arr[i]))
                     return 0;
             }
             return (uint8_t const *)(arr + number);
@@ -196,11 +241,8 @@ static uint8_t *fproto_unmarshal(fnet_client_t *client, fproto_field_t type, uin
         case FPROTO_FIELD_UINT8:
         {
             uint8_t *arr = (uint8_t *)ptr;
-            for(uint32_t i = 0; i < number; ++i)
-            {
-                if (!funmarshal_u8(client, arr + i))
-                    return 0;
-            }
+            if (!funmarshal(client, arr, number))
+                return 0;
             return arr + number;
         }
 
@@ -221,6 +263,17 @@ static uint8_t *fproto_unmarshal(fnet_client_t *client, fproto_field_t type, uin
             for(uint32_t i = 0; i < number; ++i)
             {
                 if (!funmarshal_u32(client, arr + i))
+                    return 0;
+            }
+            return (uint8_t *)(arr + number);
+        }
+
+        case FPROTO_FIELD_UINT64:
+        {
+            uint64_t *arr = (uint64_t *)ptr;
+            for(uint32_t i = 0; i < number; ++i)
+            {
+                if (!funmarshal_u64(client, arr + i))
                     return 0;
             }
             return (uint8_t *)(arr + number);
@@ -460,6 +513,36 @@ bool fproto_read_message(fnet_client_t *client, fproto_msg_handlers_t *handlers)
                 if (!fproto_recv(client, (fproto_msg_t)msg, (uint8_t *)&req)) break;
                 if (handlers->sync_files_list_handler)
                     handlers->sync_files_list_handler(handlers->param, &req.uuid, req.is_last, req.files_num, req.files);
+                ret = true;
+                break;
+            }
+
+            case FPROTO_REQUEST_FILES_CONTENT:
+            {
+                fproto_request_files_content_t req;
+                if (!fproto_recv(client, (fproto_msg_t)msg, (uint8_t *)&req)) break;
+                if (handlers->request_files_content_handler)
+                    handlers->request_files_content_handler(handlers->param, &req.uuid, req.files_num, req.files);
+                ret = true;
+                break;
+            }
+
+            case FPROTO_FILE_INFO:
+            {
+                fproto_file_info_t req;
+                if (!fproto_recv(client, (fproto_msg_t)msg, (uint8_t *)&req)) break;
+                if (handlers->file_info_handler)
+                    handlers->file_info_handler(handlers->param, &req.uuid, req.path, req.id, req.size);
+                ret = true;
+                break;
+            }
+
+            case FPROTO_FILE_PART:
+            {
+                fproto_file_part_t req;
+                if (!fproto_recv(client, (fproto_msg_t)msg, (uint8_t *)&req)) break;
+                if (handlers->file_part_handler)
+                    handlers->file_part_handler(handlers->param, &req.uuid, req.id, req.size, req.offset, req.data);
                 ret = true;
                 break;
             }

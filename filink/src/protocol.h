@@ -8,9 +8,12 @@
 // Message types
 typedef enum
 {
-    FPROTO_HELLO = 0,           // Handshake
-    FPROTO_NODE_STATUS,         // Node status notification
-    FPROTO_SYNC_FILES_LIST      // Files list notification for sync
+    FPROTO_HELLO = 0,               // Handshake
+    FPROTO_NODE_STATUS,             // Node status notification
+    FPROTO_SYNC_FILES_LIST,         // Files list notification for sync
+    FPROTO_REQUEST_FILES_CONTENT,   // Request files content
+    FPROTO_FILE_INFO,               // File information
+    FPROTO_FILE_PART                // File part
 } fproto_msg_t;
 
 enum
@@ -58,15 +61,45 @@ typedef struct
     fproto_sync_file_info_t files[FPROTO_SYNC_FILES_LIST_SIZE];
 } fproto_sync_files_list_t;
 
-// Message handlers
-typedef void (*fproto_node_status_handler_t)(void *, fuuid_t const *, uint32_t);
-typedef void (*fproto_sync_files_list_handler_t)(void *, fuuid_t const *, bool, uint8_t, fproto_sync_file_info_t const *);
+typedef struct
+{
+    fuuid_t             uuid;
+    uint8_t             files_num;
+    char                files[FPROTO_SYNC_FILES_LIST_SIZE][FPROTO_MAX_PATH];
+} fproto_request_files_content_t;
 
 typedef struct
 {
-    void                            *param;
-    fproto_node_status_handler_t     node_status_handler;
-    fproto_sync_files_list_handler_t sync_files_list_handler;
+    fuuid_t             uuid;
+    char                path[FPROTO_MAX_PATH];
+    uint32_t            id;
+    uint64_t            size;
+} fproto_file_info_t;
+
+typedef struct
+{
+    fuuid_t             uuid;
+    uint32_t            id;
+    uint16_t            size;
+    uint64_t            offset;
+    uint8_t             data[64 * 1024];
+} fproto_file_part_t;
+
+// Message handlers
+typedef void (*fproto_node_status_handler_t)(void *, fuuid_t const *, uint32_t);
+typedef void (*fproto_sync_files_list_handler_t)(void *, fuuid_t const *, bool, uint8_t, fproto_sync_file_info_t const *);
+typedef void (*fproto_request_files_content_handler_t)(void *, fuuid_t const *, uint8_t, char (*)[FPROTO_MAX_PATH]);
+typedef void (*fproto_file_info_handler_t)(void *, fuuid_t const *, char const *, uint32_t, uint64_t);
+typedef void (*fproto_file_part_handler_t)(void *, fuuid_t const *, uint32_t, uint16_t, uint64_t, uint8_t const *);
+
+typedef struct
+{
+    void                                  *param;
+    fproto_node_status_handler_t           node_status_handler;
+    fproto_sync_files_list_handler_t       sync_files_list_handler;
+    fproto_request_files_content_handler_t request_files_content_handler;
+    fproto_file_info_handler_t             file_info_handler;
+    fproto_file_part_handler_t             file_part_handler;
 } fproto_msg_handlers_t;
 
 bool fproto_client_handshake_request (fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid);

@@ -1,4 +1,5 @@
 #include "files.h"
+#include <futils/md5.h>
 #include <futils/static_allocator.h>
 #include <futils/log.h>
 #include <string.h>
@@ -71,6 +72,8 @@ bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t const *info)
 {
     fdb_init();
 
+    bool ret = false;
+
     fsdb_push_lock(sync.mutex);
 
     fdb_file_info_t const key = { *uuid, *info };
@@ -87,24 +90,27 @@ bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t const *info)
             memcpy(&file->info, info, sizeof *info);
             sync.files_list[sync.files_list_size++] = file;
             qsort(sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
+            ret = true;
         }
         else
-        {
             FS_WARN("Unable to allocate memory for changed file name");
-            return false;
-        }
     }
     else
-        memcpy(*inf, info, sizeof *info);
+    {
+        memcpy(&(*inf)->info, info, sizeof *info);
+        ret = true;
+    }
 
     fsdb_pop_lock();
 
-    return true;
+    return ret;
 }
 
 bool fdb_sync_file_del(fuuid_t const *uuid, char const *path)
 {
     fdb_init();
+
+    bool ret = false;
 
     fsdb_push_lock(sync.mutex);
 
@@ -121,12 +127,12 @@ bool fdb_sync_file_del(fuuid_t const *uuid, char const *path)
         for(++idx; idx < sync.files_list_size; ++idx)
             sync.files_list[idx - 1] = sync.files_list[idx];
         sync.files_list[sync.files_list_size--] = 0;
-        return true;
+        ret = true;
     }
 
     fsdb_pop_lock();
 
-    return false;
+    return ret;
 }
 
 bool fdb_sync_file_del_all(fuuid_t const *uuid)
@@ -157,7 +163,9 @@ bool fdb_sync_file_update(fuuid_t const *uuid, ffile_info_t const *info)
 
 struct fdb_syncfiles_iterator
 {
-    fuuid_t uuid;
+    bool    diff;
+    fuuid_t uuid0;
+    fuuid_t uuid1;
     size_t  idx;
 };
 
@@ -171,8 +179,30 @@ fdb_sync_files_iterator_t *fdb_sync_files_iterator(fuuid_t const *uuid)
         FS_ERR("Unable to allocate memory sync files iterator");
         return 0;
     }
+    memset(piterator, 0, sizeof *piterator);
 
-    memcpy(&piterator->uuid, uuid, sizeof *uuid);
+    piterator->diff = false;
+    memcpy(&piterator->uuid0, uuid, sizeof *uuid);
+    piterator->idx = 0;
+
+    return piterator;
+}
+
+fdb_sync_files_iterator_t *fdb_sync_files_iterator_diff(fuuid_t const *uuid0, fuuid_t const *uuid1)
+{
+    if (!uuid0 || !uuid1) return 0;
+
+    fdb_sync_files_iterator_t *piterator = malloc(sizeof(fdb_sync_files_iterator_t));
+    if (!piterator)
+    {
+        FS_ERR("Unable to allocate memory sync files iterator");
+        return 0;
+    }
+    memset(piterator, 0, sizeof *piterator);
+
+    piterator->diff = true;
+    memcpy(&piterator->uuid0, uuid0, sizeof *uuid0);
+    memcpy(&piterator->uuid1, uuid1, sizeof *uuid1);
     piterator->idx = 0;
 
     return piterator;
@@ -184,7 +214,7 @@ void fdb_sync_files_iterator_free(fdb_sync_files_iterator_t *piterator)
         free(piterator);
 }
 
-bool fdb_sync_files_iterator_first(fdb_sync_files_iterator_t *piterator, ffile_info_t *info)
+bool fdb_sync_files_iterator_first(fdb_sync_files_iterator_t *piterator, ffile_info_t *info, fdb_diff_kind_t *diff_kind)
 {
     if (!piterator || !info)
         return false;
@@ -193,13 +223,37 @@ bool fdb_sync_files_iterator_first(fdb_sync_files_iterator_t *piterator, ffile_i
 
     fsdb_push_lock(sync.mutex);
 
-    for(piterator->idx = 0; piterator->idx < sync.files_list_size; ++piterator->idx)
+    if (!piterator->diff)
     {
-        if (memcmp(&sync.files_list[piterator->idx]->uuid, &piterator->uuid, sizeof piterator->uuid) == 0)
+        for(piterator->idx = 0; piterator->idx < sync.files_list_size; ++piterator->idx)
         {
-            memcpy(info, &sync.files_list[piterator->idx]->info, sizeof *info);
-            ret = true;
-            break;
+            if (memcmp(&sync.files_list[piterator->idx]->uuid, &piterator->uuid0, sizeof piterator->uuid0) == 0)
+            {
+                memcpy(info, &sync.files_list[piterator->idx]->info, sizeof *info);
+                ret = true;
+                break;
+            }
+        }
+    }
+    else
+    {
+        for(piterator->idx = 0; piterator->idx < sync.files_list_size; ++piterator->idx)
+        {
+            if (memcmp(&sync.files_list[piterator->idx]->uuid, &piterator->uuid0, sizeof piterator->uuid0) == 0)
+            {
+                fdb_file_info_t key = { piterator->uuid1 };
+                strncpy(key.info.path, sync.files_list[piterator->idx]->info.path, sizeof key.info.path);
+
+                fdb_file_info_t const *pkey = &key;
+                fdb_file_info_t **inf = (fdb_file_info_t **)bsearch(&pkey, sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
+
+                if (!inf)
+                {
+                    memcpy(info, &sync.files_list[piterator->idx]->info, sizeof *info);
+                    ret = true;
+                    break;
+                }
+            }
         }
     }
 
@@ -208,25 +262,58 @@ bool fdb_sync_files_iterator_first(fdb_sync_files_iterator_t *piterator, ffile_i
     return ret;
 }
 
-bool fdb_sync_files_iterator_next(fdb_sync_files_iterator_t *piterator, ffile_info_t *info)
+bool fdb_sync_files_iterator_next(fdb_sync_files_iterator_t *piterator, ffile_info_t *info, fdb_diff_kind_t *diff_kind)
 {
     if (!piterator || !info)
         return false;
 
+    bool ret = false;
+
     if (piterator->idx >= sync.files_list_size)
         return false;
 
-    bool ret = false;
-
     fsdb_push_lock(sync.mutex);
 
-    for(piterator->idx++; piterator->idx < sync.files_list_size; ++piterator->idx)
+    if (!piterator->diff)
     {
-        if (memcmp(&sync.files_list[piterator->idx]->uuid, &piterator->uuid, sizeof piterator->uuid) == 0)
+        for(piterator->idx++; piterator->idx < sync.files_list_size; ++piterator->idx)
         {
-            memcpy(info, &sync.files_list[piterator->idx]->info, sizeof *info);
-            ret = true;
-            break;
+            if (memcmp(&sync.files_list[piterator->idx]->uuid, &piterator->uuid0, sizeof piterator->uuid0) == 0)
+            {
+                memcpy(info, &sync.files_list[piterator->idx]->info, sizeof *info);
+                ret = true;
+                break;
+            }
+        }
+    }
+    else
+    {
+        for(piterator->idx++; piterator->idx < sync.files_list_size; ++piterator->idx)
+        {
+            if (memcmp(&sync.files_list[piterator->idx]->uuid, &piterator->uuid0, sizeof piterator->uuid0) == 0)
+            {
+                fdb_file_info_t key = { piterator->uuid1 };
+                strncpy(key.info.path, sync.files_list[piterator->idx]->info.path, sizeof key.info.path);
+
+                fdb_file_info_t const *pkey = &key;
+                fdb_file_info_t **inf = (fdb_file_info_t **)bsearch(&pkey, sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
+
+                if (!inf)
+                {
+                    memcpy(info, &sync.files_list[piterator->idx]->info, sizeof *info);
+                    if (diff_kind)
+                        *diff_kind = FDB_FILE_ABSENT;
+                    ret = true;
+                    break;
+                }
+                else if (memcmp(&sync.files_list[piterator->idx]->info.digest, &(*inf)->info.digest, sizeof (*inf)->info.digest))
+                {
+                    if (diff_kind)
+                        *diff_kind = FDB_DIFF_CONTENT;
+                    ret = true;
+                    break;
+                }
+            }
         }
     }
 

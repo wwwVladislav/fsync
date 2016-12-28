@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 struct fsdir
 {
@@ -201,7 +202,7 @@ static size_t fsget_directory_by_iterator(fsiterator_t *piterator, char *subdir,
 
     if (subdir && subdir[0])
     {
-        if (wsize < size)
+        if (wsize && wsize < size)
             path[wsize++] = delimiter;
 
         for(char *ch = subdir; *ch; ++ch)
@@ -270,6 +271,11 @@ size_t fsdir_iterator_directory(fsiterator_t *piterator, char *path, size_t size
     return fsget_directory_by_iterator(piterator, 0, path, size, false);
 }
 
+size_t fsdir_iterator_path(fsiterator_t *piterator, dirent_t *pentry, char *path, size_t size)
+{
+    return fsget_directory_by_iterator(piterator, pentry->name, path, size, false);
+}
+
 size_t fsdir_iterator_full_path(fsiterator_t *piterator, dirent_t *pentry, char *path, size_t size)
 {
     return fsget_directory_by_iterator(piterator, pentry->name, path, size, true);
@@ -314,3 +320,15 @@ bool fsfile_md5sum(char const *path, fmd5_t *sum)
         FS_ERR("Unable to open the file: \'%s\'", path);
     return false;
 }
+
+bool fsfile_size(char const *path, uint64_t *size)
+{
+    if (!path || !size)
+        return false;
+    struct stat st;
+    if (stat(path, &st) == -1)
+        return false;
+    *size = st.st_size;
+    return true;
+}
+

@@ -75,7 +75,7 @@ typedef struct
 enum
 {
     FMSGBUS_MAX_HANDLERS = 256,
-    FMSGBUS_MAX_THREADS  = 4
+    FMSGBUS_MAX_THREADS  = 8
 };
 
 struct fmsgbus

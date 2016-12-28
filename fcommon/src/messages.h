@@ -7,7 +7,9 @@ typedef enum
 {
     FNODE_STATUS = 1,
     FSYNC_FILES_LIST,
-    FREQUEST_SYNC_FILES
+    FREQUEST_FILES_CONTENT,
+    FFILE_INFO,
+    FFILE_PART
 } fmessage_t;
 
 enum
@@ -45,9 +47,27 @@ typedef struct
 {
     fuuid_t             uuid;
     fuuid_t             destination;
-    bool                is_last;
     uint8_t             files_num;
     char                files[32][FMAX_PATH];
-} fmsg_request_sync_files_t;
+} fmsg_request_files_content_t;
+
+typedef struct
+{
+    fuuid_t             uuid;
+    fuuid_t             destination;
+    char                path[FMAX_PATH];
+    uint32_t            id;
+    uint64_t            size;
+} fmsg_file_info_t;
+
+typedef struct
+{
+    fuuid_t             uuid;
+    fuuid_t             destination;
+    uint32_t            id;
+    uint16_t            size;
+    uint64_t            offset;
+    uint8_t             data[64 * 1024];
+} fmsg_file_part_t;
 
 #endif

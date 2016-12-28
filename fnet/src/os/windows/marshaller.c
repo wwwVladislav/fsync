@@ -23,6 +23,14 @@ bool fmarshal_u32(fnet_client_t *client, uint32_t v)
     return fnet_send(client, &v, sizeof v);
 }
 
+bool fmarshal_u64(fnet_client_t *client, uint64_t v)
+{
+    #define fhtonll(x) ((1==htonl(1)) ? (x) : ((uint64_t)htonl((x) & 0xFFFFFFFF) << 32) | htonl((x) >> 32))
+    v = fhtonll(v);
+    #undef fhtonll
+    return fnet_send(client, &v, sizeof v);
+}
+
 bool fmarshal_uuid(fnet_client_t *client, fuuid_t const *v)
 {
     return fnet_send(client, v, sizeof *v);
@@ -57,6 +65,16 @@ bool funmarshal_u32(fnet_client_t *client, uint32_t *v)
     if (!fnet_recv(client, v, sizeof *v))
         return false;
     *v = ntohl(*v);
+    return true;
+}
+
+bool funmarshal_u64(fnet_client_t *client, uint64_t *v)
+{
+    if (!fnet_recv(client, v, sizeof *v))
+        return false;
+    #define fntohll(x) ((1==ntohl(1)) ? (x) : ((uint64_t)ntohl((x) & 0xFFFFFFFF) << 32) | ntohl((x) >> 32))
+    *v = fntohll(*v);
+    #undef fntohll
     return true;
 }
 

@@ -286,7 +286,7 @@ bool fsdir_listener_add_path(fsdir_listener_t *listener, char const *path)
     }
 
     size_t path_len = strlen(path);
-    if (path_len + 1 > FSMAX_PATH)
+    if (path_len + 1 > FMAX_PATH)
     {
         FS_ERR("The path for listener is too long: \'%s\'", path);
         return false;

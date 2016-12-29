@@ -9,16 +9,16 @@
 struct fsdir
 {
     DIR *pdir;
-    char name[FSMAX_FILENAME];
+    char name[FMAX_FILENAME];
 };
 
 struct fsfile { int test; };
 
 struct fsiterator
 {
-    char           path[FSMAX_PATH];
+    char           path[FMAX_PATH];
     unsigned short depth;
-    fsdir_t        dirs[FSMAX_DIR_DEPTH];
+    fsdir_t        dirs[FMAX_DIR_DEPTH];
 };
 
 static bool fsopendir(fsdir_t *pdir, char const *path, char const *name)
@@ -121,7 +121,7 @@ fsiterator_t *fsdir_iterator(char const *path)
     if (!path) return 0;
 
     size_t len = strlen(path);
-    if (len > FSMAX_PATH)
+    if (len > FMAX_PATH)
     {
         FS_ERR("Path is too long");
         return 0;
@@ -233,13 +233,13 @@ bool fsdir_iterator_next(fsiterator_t *piterator, dirent_t *pentry)
 
                 case FS_DIR:
                 {
-                    if (piterator->depth >= FSMAX_DIR_DEPTH)
+                    if (piterator->depth >= FMAX_DIR_DEPTH)
                     {
                         FS_ERR("The directory \'%s\' is skipped due the restriction for maximum directory depth", pentry->name);
                         continue;
                     }
 
-                    char path[FSMAX_PATH];
+                    char path[FMAX_PATH];
                     size_t len = fsget_directory_by_iterator(piterator, pentry->name, path, sizeof path, true);
                     if (len >= sizeof path)
                     {

@@ -2,19 +2,19 @@
 #define FSYNC_FILES_H_FDB
 #include <futils/md5.h>
 #include <futils/uuid.h>
+#include <config.h>
 #include <time.h>
 
-enum
-{
-    FDB_MAX_PATH = 1024 // Max file path length
-};
+#define FINVALID_ID (~0u)
 
 typedef struct
 {
-    time_t  mod_time;
-    time_t  sync_time;
-    fmd5_t  digest;
-    char    path[FDB_MAX_PATH];
+    uint32_t id;
+    time_t   mod_time;
+    time_t   sync_time;
+    fmd5_t   digest;
+    char     path[FMAX_PATH];
+    uint64_t size;
 } ffile_info_t;
 
 typedef struct fdb_syncfiles_iterator fdb_sync_files_iterator_t;
@@ -23,6 +23,7 @@ bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t const *info);
 bool fdb_sync_file_del(fuuid_t const *uuid, char const *path);
 bool fdb_sync_file_del_all(fuuid_t const *uuid);
 bool fdb_sync_file_update(fuuid_t const *uuid, ffile_info_t const *info);
+bool fdb_sync_file_path(fuuid_t const *uuid, uint32_t id, char *path, size_t size);
 
 typedef enum
 {
@@ -35,5 +36,6 @@ fdb_sync_files_iterator_t *fdb_sync_files_iterator_diff(fuuid_t const *uuid0, fu
 void                       fdb_sync_files_iterator_free(fdb_sync_files_iterator_t *);
 bool                       fdb_sync_files_iterator_first(fdb_sync_files_iterator_t *, ffile_info_t *, fdb_diff_kind_t *);
 bool                       fdb_sync_files_iterator_next(fdb_sync_files_iterator_t *, ffile_info_t *, fdb_diff_kind_t *);
-
+bool                       fdb_sync_files_iterator_uuid(fdb_sync_files_iterator_t *, ffile_info_t *);
+uint32_t                   fdb_get_uuids(fuuid_t uuids[FMAX_CONNECTIONS_NUM]);
 #endif

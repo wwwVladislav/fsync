@@ -25,7 +25,7 @@ typedef void (*fsdev_hotplug_callback_fn_t)(fsdev_action_t, char const *);
 
 typedef struct
 {
-    char name[FSMAX_FILENAME];
+    char name[FMAX_FILENAME];
 } fsdev_volume_t;
 
 fsdev_handle_t fsdev_hotplug_register_callback(fsdev_type_t, fsdev_hotplug_callback_fn_t);

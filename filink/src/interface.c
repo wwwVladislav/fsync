@@ -8,11 +8,6 @@
 #include <pthread.h>
 #include <stddef.h>
 
-enum
-{
-    FILINK_MAX_ALLOWED_CONNECTIONS_NUM = 64
-};
-
 typedef struct
 {
     fnet_client_t *transport;
@@ -27,7 +22,7 @@ struct filink
     fnet_server_t        *server;
     pthread_mutex_t       nodes_mutex;
     volatile size_t       nodes_num;
-    node_t                nodes[FILINK_MAX_ALLOWED_CONNECTIONS_NUM];
+    node_t                nodes[FMAX_CONNECTIONS_NUM];
     fnet_wait_handler_t   wait_handler;
     fproto_msg_handlers_t proto_handlers;
     fmsgbus_t            *msgbus;
@@ -60,7 +55,7 @@ static bool filink_add_node(filink_t *ilink, fnet_client_t *pclient, fuuid_t con
     bool ret = true;
 
     filink_push_lock(ilink->nodes_mutex);
-    if (ilink->nodes_num < FILINK_MAX_ALLOWED_CONNECTIONS_NUM)
+    if (ilink->nodes_num < FMAX_CONNECTIONS_NUM)
     {
         for(size_t i = 0; i < ilink->nodes_num; ++i)
         {
@@ -140,6 +135,7 @@ static void filink_send_message(filink_t *ilink, fuuid_t const *destination, fpr
 static void filink_status_handler(filink_t *ilink, uint32_t msg_type, fmsg_node_status_t const *msg, uint32_t size)
 {
     (void)size;
+    (void)msg_type;
     if (memcmp(&msg->uuid, &ilink->uuid, sizeof ilink->uuid) == 0)
     {
         fproto_node_status_t const pmsg = { msg->uuid,  filink_status_to_proto(msg->status) };
@@ -150,6 +146,7 @@ static void filink_status_handler(filink_t *ilink, uint32_t msg_type, fmsg_node_
 static void filink_sync_files_list_handler(filink_t *ilink, uint32_t msg_type, fmsg_sync_files_list_t const *msg, uint32_t size)
 {
     (void)size;
+    (void)msg_type;
     if (memcmp(&msg->uuid, &ilink->uuid, sizeof ilink->uuid) == 0)
     {
         fproto_sync_files_list_t pmsg =
@@ -161,57 +158,44 @@ static void filink_sync_files_list_handler(filink_t *ilink, uint32_t msg_type, f
 
         for(uint32_t i = 0; i < msg->files_num; ++i)
         {
-            memcpy(pmsg.files[i].path, msg->files[i].path, sizeof msg->files[i].path);
+            pmsg.files[i].id     = msg->files[i].id;
             pmsg.files[i].digest = msg->files[i].digest;
+            pmsg.files[i].size   = msg->files[i].size;
+            memcpy(pmsg.files[i].path, msg->files[i].path, sizeof msg->files[i].path);
         }
 
         filink_send_message(ilink, &msg->destination, FPROTO_SYNC_FILES_LIST, &pmsg);
     }
 }
 
-static void filink_req_files_content_handler(filink_t *ilink, uint32_t msg_type, fmsg_request_files_content_t const *msg, uint32_t size)
+static void filink_file_part_request_handler(filink_t *ilink, uint32_t msg_type, fmsg_file_part_request_t const *msg, uint32_t size)
 {
     (void)size;
+    (void)msg_type;
     if (memcmp(&msg->uuid, &ilink->uuid, sizeof ilink->uuid) == 0)
     {
-        fproto_request_files_content_t pmsg =
+        fproto_file_part_request_t pmsg =
         {
             msg->uuid,
-            msg->files_num
+            msg->id,
+            msg->block_number
         };
 
-        for(uint32_t i = 0; i < msg->files_num; ++i)
-            memcpy(pmsg.files[i], msg->files[i], sizeof msg->files[i]);
-
-        filink_send_message(ilink, &msg->destination, FPROTO_REQUEST_FILES_CONTENT, &pmsg);
-    }
-}
-
-static void filink_file_info_handler(filink_t *ilink, uint32_t msg_type, fmsg_file_info_t const *msg, uint32_t size)
-{
-    (void)size;
-    if (memcmp(&msg->uuid, &ilink->uuid, sizeof ilink->uuid) == 0)
-    {
-        fproto_file_info_t pmsg;
-        pmsg.uuid = msg->uuid;
-        memcpy(pmsg.path, msg->path, sizeof msg->path);
-        pmsg.id = msg->id;
-        pmsg.size = msg->size;
-
-        filink_send_message(ilink, &msg->destination, FPROTO_FILE_INFO, &pmsg);
+        filink_send_message(ilink, &msg->destination, FPROTO_FILE_PART_REQUEST, &pmsg);
     }
 }
 
 static void filink_file_part_handler(filink_t *ilink, uint32_t msg_type, fmsg_file_part_t const *msg, uint32_t size)
 {
     (void)size;
+    (void)msg_type;
     if (memcmp(&msg->uuid, &ilink->uuid, sizeof ilink->uuid) == 0)
     {
         fproto_file_part_t pmsg;
-        pmsg.uuid = msg->uuid;
-        pmsg.id = msg->id;
-        pmsg.size = msg->size;
-        pmsg.offset = msg->offset;
+        pmsg.uuid         = msg->uuid;
+        pmsg.id           = msg->id;
+        pmsg.block_number = msg->block_number;
+        pmsg.size         = msg->size;
         memcpy(pmsg.data, msg->data, msg->size);
 
         filink_send_message(ilink, &msg->destination, FPROTO_FILE_PART, &pmsg);
@@ -221,80 +205,66 @@ static void filink_file_part_handler(filink_t *ilink, uint32_t msg_type, fmsg_fi
 static void filink_msgbus_retain(filink_t *ilink, fmsgbus_t *pmsgbus)
 {
     ilink->msgbus = fmsgbus_retain(pmsgbus);
-    fmsgbus_subscribe(ilink->msgbus, FNODE_STATUS,           (fmsg_handler_t)filink_status_handler,            ilink);
-    fmsgbus_subscribe(ilink->msgbus, FSYNC_FILES_LIST,       (fmsg_handler_t)filink_sync_files_list_handler,   ilink);
-    fmsgbus_subscribe(ilink->msgbus, FREQUEST_FILES_CONTENT, (fmsg_handler_t)filink_req_files_content_handler, ilink);
-    fmsgbus_subscribe(ilink->msgbus, FFILE_INFO,             (fmsg_handler_t)filink_file_info_handler,         ilink);
-    fmsgbus_subscribe(ilink->msgbus, FFILE_PART,             (fmsg_handler_t)filink_file_part_handler,         ilink);
+    fmsgbus_subscribe(ilink->msgbus, FNODE_STATUS,          (fmsg_handler_t)filink_status_handler,            ilink);
+    fmsgbus_subscribe(ilink->msgbus, FSYNC_FILES_LIST,      (fmsg_handler_t)filink_sync_files_list_handler,   ilink);
+    fmsgbus_subscribe(ilink->msgbus, FFILE_PART_REQUEST,    (fmsg_handler_t)filink_file_part_request_handler, ilink);
+    fmsgbus_subscribe(ilink->msgbus, FFILE_PART,            (fmsg_handler_t)filink_file_part_handler,         ilink);
 }
 
 static void filink_msgbus_release(filink_t *ilink)
 {
-    fmsgbus_unsubscribe(ilink->msgbus, FNODE_STATUS,           (fmsg_handler_t)filink_status_handler);
-    fmsgbus_unsubscribe(ilink->msgbus, FSYNC_FILES_LIST,       (fmsg_handler_t)filink_sync_files_list_handler);
-    fmsgbus_unsubscribe(ilink->msgbus, FREQUEST_FILES_CONTENT, (fmsg_handler_t)filink_req_files_content_handler);
-    fmsgbus_unsubscribe(ilink->msgbus, FFILE_INFO,             (fmsg_handler_t)filink_file_info_handler);
-    fmsgbus_unsubscribe(ilink->msgbus, FFILE_PART,             (fmsg_handler_t)filink_file_part_handler);
+    fmsgbus_unsubscribe(ilink->msgbus, FNODE_STATUS,        (fmsg_handler_t)filink_status_handler);
+    fmsgbus_unsubscribe(ilink->msgbus, FSYNC_FILES_LIST,    (fmsg_handler_t)filink_sync_files_list_handler);
+    fmsgbus_unsubscribe(ilink->msgbus, FFILE_PART_REQUEST,  (fmsg_handler_t)filink_file_part_request_handler);
+    fmsgbus_unsubscribe(ilink->msgbus, FFILE_PART,          (fmsg_handler_t)filink_file_part_handler);
     fmsgbus_release(ilink->msgbus);
 }
 
-static void fproto_node_status_handler(filink_t *ilink, fuuid_t const *uuid, uint32_t status)
+static void fproto_node_status_handler(filink_t *ilink, fproto_node_status_t const *pmsg)
 {
-    fmsg_node_status_t const msg = { *uuid,  filink_status_from_proto(status) };
+    fmsg_node_status_t const msg = { pmsg->uuid,  filink_status_from_proto(pmsg->status) };
     fmsgbus_publish(ilink->msgbus, FNODE_STATUS, &msg, sizeof msg);
 }
 
-static void fproto_sync_files_list_handler(filink_t *ilink, fuuid_t const *uuid, bool is_last, uint8_t files_num, fproto_sync_file_info_t const *files)
+static void fproto_sync_files_list_handler(filink_t *ilink, fproto_sync_files_list_t const *pmsg)
 {
     fmsg_sync_files_list_t msg;
-    msg.uuid = *uuid;
+    msg.uuid        = pmsg->uuid;
     msg.destination = ilink->uuid;
-    msg.is_last = is_last;
-    msg.files_num = files_num;
+    msg.is_last     = pmsg->is_last;
+    msg.files_num   = pmsg->files_num;
 
-    for(uint32_t i = 0; i < files_num; ++i)
+    for(uint32_t i = 0; i < pmsg->files_num; ++i)
     {
-        memcpy(msg.files[i].path, files[i].path, sizeof files[i].path);
-        msg.files[i].digest = files[i].digest;
+        msg.files[i].id     = pmsg->files[i].id;
+        msg.files[i].digest = pmsg->files[i].digest;
+        msg.files[i].size   = pmsg->files[i].size;
+        memcpy(msg.files[i].path, pmsg->files[i].path, sizeof pmsg->files[i].path);
     }
 
     fmsgbus_publish(ilink->msgbus, FSYNC_FILES_LIST, &msg, sizeof msg);
 }
 
-static void fproto_request_files_content_handler(filink_t *ilink, fuuid_t const *uuid, uint8_t files_num, char (*files)[FPROTO_MAX_PATH])
+static void fproto_file_part_request_handler(filink_t *ilink, fproto_file_part_request_t const *pmsg)
 {
-    fmsg_request_files_content_t msg;
-    msg.uuid = *uuid;
-    msg.destination = ilink->uuid;
-    msg.files_num = files_num;
+    fmsg_file_part_request_t msg;
+    msg.uuid         = pmsg->uuid;
+    msg.destination  = ilink->uuid;
+    msg.id           = pmsg->id;
+    msg.block_number = pmsg->block_number;
 
-    for(uint32_t i = 0; i < files_num; ++i)
-        memcpy(msg.files[i], files[i], sizeof files[i]);
-
-    fmsgbus_publish(ilink->msgbus, FREQUEST_FILES_CONTENT, &msg, sizeof msg);
+    fmsgbus_publish(ilink->msgbus, FFILE_PART_REQUEST, &msg, sizeof msg);
 }
 
-static void fproto_file_info_handler(filink_t *ilink, fuuid_t const *uuid, char const *path, uint32_t id, uint64_t size)
-{
-    fmsg_file_info_t msg;
-    msg.uuid = *uuid;
-    msg.destination = ilink->uuid;
-    memcpy(msg.path, path, sizeof msg.path);
-    msg.id = id;
-    msg.size = size;
-
-    fmsgbus_publish(ilink->msgbus, FFILE_INFO, &msg, sizeof msg);
-}
-
-static void fproto_file_part_handler(filink_t *ilink, fuuid_t const *uuid, uint32_t id, uint16_t size, uint64_t offset, uint8_t const *data)
+static void fproto_file_part_handler(filink_t *ilink, fproto_file_part_t const *pmsg)
 {
     fmsg_file_part_t msg;
-    msg.uuid = *uuid;
-    msg.destination = ilink->uuid;
-    msg.id = id;
-    msg.size = size;
-    msg.offset = offset;
-    memcpy(msg.data, data, msg.size);
+    msg.uuid         = pmsg->uuid;
+    msg.destination  = ilink->uuid;
+    msg.id           = pmsg->id;
+    msg.block_number = pmsg->block_number;
+    msg.size         = pmsg->size;
+    memcpy(msg.data, pmsg->data, msg.size);
 
     fmsgbus_publish(ilink->msgbus, FFILE_PART, &msg, sizeof msg);
 }
@@ -329,9 +299,9 @@ static void *filink_thread(void *param)
     size_t         clients_num = 0;
     size_t         rclients_num = 0;
     size_t         eclients_num = 0;
-    fnet_client_t *clients[FILINK_MAX_ALLOWED_CONNECTIONS_NUM];
-    fnet_client_t *rclients[FILINK_MAX_ALLOWED_CONNECTIONS_NUM];
-    fnet_client_t *eclients[FILINK_MAX_ALLOWED_CONNECTIONS_NUM];
+    fnet_client_t *clients[FMAX_CONNECTIONS_NUM];
+    fnet_client_t *rclients[FMAX_CONNECTIONS_NUM];
+    fnet_client_t *eclients[FMAX_CONNECTIONS_NUM];
 
     while(ilink->is_active)
     {
@@ -400,11 +370,10 @@ filink_t *filink_bind(fmsgbus_t *pmsgbus, char const *addr, fuuid_t const *uuid)
     filink_msgbus_retain(ilink, pmsgbus);
 
     ilink->proto_handlers.param = ilink;
-    ilink->proto_handlers.node_status_handler = (fproto_node_status_handler_t)fproto_node_status_handler;
-    ilink->proto_handlers.sync_files_list_handler = (fproto_sync_files_list_handler_t)fproto_sync_files_list_handler;
-    ilink->proto_handlers.request_files_content_handler = (fproto_request_files_content_handler_t)fproto_request_files_content_handler;
-    ilink->proto_handlers.file_info_handler = (fproto_file_info_handler_t)fproto_file_info_handler;
-    ilink->proto_handlers.file_part_handler = (fproto_file_part_handler_t)fproto_file_part_handler;
+    ilink->proto_handlers.node_status_handler       = (fproto_node_status_handler_t)fproto_node_status_handler;
+    ilink->proto_handlers.sync_files_list_handler   = (fproto_sync_files_list_handler_t)fproto_sync_files_list_handler;
+    ilink->proto_handlers.file_part_request_handler = (fproto_file_part_request_handler_t)fproto_file_part_request_handler;
+    ilink->proto_handlers.file_part_handler         = (fproto_file_part_handler_t)fproto_file_part_handler;
 
     ilink->server = fnet_bind(FNET_SSL, addr, filink_clients_accepter);
     if (!ilink->server)
@@ -475,7 +444,7 @@ bool filink_connect(filink_t *ilink, char const *addr)
         return false;
     }
 
-    if (ilink->nodes_num >= FILINK_MAX_ALLOWED_CONNECTIONS_NUM)
+    if (ilink->nodes_num >= FMAX_CONNECTIONS_NUM)
     {
         FS_ERR("The maximum allowed connections number is reached: %u", ilink->nodes_num);
         return false;

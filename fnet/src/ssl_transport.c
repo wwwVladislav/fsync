@@ -8,6 +8,12 @@
 #include <pthread.h>
 #include <assert.h>
 
+// !!! Prepares a folder for use as the path parameter: "c_rehash ./certificates"
+char const *FNET_TRUSTED_CERTS_DIR  = "./certificates";
+char const *FNET_CERTIFICATE_FILE   = "node.cert.pem";
+char const *FNET_PRIVATE_KEY_FILE   = "node.key.pem";
+char const *FNET_DEFAULT_PASSWORD   = "123456";
+
 fnet_socket_t fnet_tcp_client_socket(fnet_tcp_client_t const *);
 
 struct fnet_ssl_client

@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 2.6)
 project(fsync)
 
 set(FSYNC_HEADERS
-    src/config.h
     src/device.h
     src/fsutils.h
     src/sync.h

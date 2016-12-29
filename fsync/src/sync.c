@@ -31,7 +31,7 @@ struct fsync
     volatile bool        is_active;
 
     fuuid_t              uuid;
-    char                 dir[FSMAX_PATH];
+    char                 dir[FMAX_PATH];
 
     sem_t                events_sem;                                                                         // semaphore for events waiting
     fring_queue_t       *events_queue;                                                                       // events queue
@@ -44,7 +44,6 @@ struct fsync
     fmsgbus_t           *msgbus;
 
     pthread_mutex_t      id_mutex;
-    uint32_t             next_id;
 };
 
 #define fsync_push_lock(mutex)                      \
@@ -86,8 +85,10 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
                  ret = fdb_sync_files_iterator_next(it, &info, 0))
             {
                 fsync_file_info_t *file_info = &files_list.files[files_list.files_num];
-                memcpy(file_info->path,     info.path,   sizeof info.path);
-                memcpy(&file_info->digest, &info.digest, sizeof info.digest);
+                file_info->id     = info.id;
+                file_info->digest = info.digest;
+                file_info->size   = info.size;
+                memcpy(file_info->path, info.path, sizeof info.path);
 
                 if (++files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
                 {
@@ -112,153 +113,61 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
     {
         FS_INFO("UUID %llx%llx sent files list for synchronization", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
 
+        time_t const cur_time = time(0);
+
         for(uint32_t i = 0; i < msg->files_num; ++i)
         {
             ffile_info_t info = { 0 };
+            info.id = msg->files[i].id;
+            info.mod_time = cur_time;
             info.digest = msg->files[i].digest;
             memcpy(info.path, msg->files[i].path, sizeof msg->files[i].path);
+            info.size = msg->files[i].size;
             fdb_sync_file_add(&msg->uuid, &info);
         }
-
-        if (msg->is_last)
-        {
-            FS_INFO("Request files from UUID %llx%llx", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
-
-            fmsg_request_files_content_t files_req;
-            files_req.uuid = psync->uuid;
-            files_req.destination = msg->uuid;
-            files_req.files_num = 0;
-
-            fdb_sync_files_iterator_t *it = fdb_sync_files_iterator_diff(&msg->uuid, &psync->uuid);
-            if (it)
-            {
-                ffile_info_t info;
-
-                for (bool ret = fdb_sync_files_iterator_first(it, &info, 0);
-                     psync->is_active && ret;
-                     ret = fdb_sync_files_iterator_next(it, &info, 0))
-                {
-                    char *path = files_req.files[files_req.files_num];
-                    memcpy(path, info.path, sizeof info.path);
-
-                    if (++files_req.files_num >= sizeof files_req.files / sizeof *files_req.files)
-                    {
-                        if (fmsgbus_publish(psync->msgbus, FREQUEST_FILES_CONTENT, &files_req, sizeof files_req) != FSUCCESS)
-                            FS_ERR("Files list wasn't requested");
-                        files_req.files_num = 0;
-                    }
-                }
-                fdb_sync_files_iterator_free(it);
-
-                if (files_req.files_num)
-                {
-                    if (fmsgbus_publish(psync->msgbus, FREQUEST_FILES_CONTENT, &files_req, sizeof files_req) != FSUCCESS)
-                        FS_ERR("Files list wasn't requested");
-                }
-            }
-        }
     }
 }
 
-static void fsync_req_files_content_handler(fsync_t *psync, uint32_t msg_type, fmsg_request_files_content_t const *msg, uint32_t size)
+static void fsync_file_part_request_handler(fsync_t *psync, uint32_t msg_type, fmsg_file_part_request_t const *msg, uint32_t size)
 {
     (void)size;
     if (memcmp(&msg->uuid, &psync->uuid, sizeof psync->uuid) != 0)
     {
-        FS_INFO("UUID %llx%llx requests files content", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
+        FS_INFO("UUID %llx%llx requests file content. Id=%u, part=%u", msg->uuid.data.u64[0], msg->uuid.data.u64[1], msg->id, msg->block_number);
 
         char path[FMAX_PATH];
         size_t len = strlen(psync->dir);
         strncpy(path, psync->dir, sizeof path);
         path[len++] = '/';
 
-        for(uint32_t i = 0; psync->is_active && i < msg->files_num; ++i)
+        if (fdb_sync_file_path(&psync->uuid, msg->id, path + len, sizeof path - len))
         {
-            fmsg_file_info_t info;
-            info.uuid = psync->uuid;
-            info.destination = msg->uuid;
-            memcpy(info.path, msg->files[i], sizeof info.path);
-            fsync_push_lock(psync->id_mutex);
-            info.id = psync->next_id++;
-            fsync_pop_lock();
-
-            if (strlen(info.path) + len > sizeof path)
-            {
-                FS_WARN("File path length is too long: \'%s\'", info.path);
-                continue;
-            }
-
-            strncpy(path + len, info.path, sizeof path - len);
-
-            if (!fsfile_size(path, &info.size))
-            {
-                FS_WARN("File \'%s\' is not accessible", info.path);
-                continue;
-            }
-
-            if (fmsgbus_publish(psync->msgbus, FFILE_INFO, &info, sizeof info) == FSUCCESS)
-            {
-                FS_INFO("File info was sent. Size of \'%s\' is %d bytes", info.path, info.size);
-
-                int fd = open(path, O_RDONLY);
-                if (fd != -1)
-                {
-                    fmsg_file_part_t file_part;
-                    file_part.uuid = psync->uuid;
-                    file_part.destination = msg->uuid;
-                    file_part.id = info.id;
-                    file_part.offset = 0;
-                    file_part.size = 0;
-
-                    ssize_t size;
-                    while((size = read(fd, file_part.data, sizeof file_part.data)) > 0)
-                    {
-                        file_part.size = (uint16_t)size;
-
-                        if (fmsgbus_publish(psync->msgbus, FFILE_PART, &file_part, sizeof file_part) != FSUCCESS)
-                            FS_ERR("Unable to send the file part: offset=%llu, size=%u", file_part.offset, file_part.size);
-                        else
-                            FS_INFO("File part was sent. path=\'%s\', offset=%llu, size=%u", info.path, file_part.offset, file_part.size);
-
-                        file_part.offset += file_part.size;
-                    }
-
-                    close(fd);
-                }
-                else
-                    FS_ERR("Unable to open the file: \'%s\'", path);
-            }
-            else FS_ERR("File info wasn't sent");
-        }
-    }
-}
-
-static void fsync_file_info_handler(fsync_t *psync, uint32_t msg_type, fmsg_file_info_t const *msg, uint32_t size)
-{
-    (void)size;
-    if (memcmp(&msg->uuid, &psync->uuid, sizeof psync->uuid) != 0)
-    {
-        FS_INFO("File info received from UUID %llx%llx. path=\'%s\', id=%u, size=%llu", msg->uuid.data.u64[0], msg->uuid.data.u64[1], msg->path, msg->id, msg->size);
-
-        char path[FMAX_PATH];
-        size_t len = strlen(psync->dir);
-        strncpy(path, psync->dir, sizeof path);
-        path[len++] = '/';
-
-        if (strlen(msg->path) + len <= sizeof path)
-        {
-            strncpy(path + len, msg->path, sizeof path - len);
-
-            int fd = open(path, O_CREAT | O_EXCL | O_WRONLY);
+            int fd = open(path, O_BINARY | O_RDONLY);
             if (fd != -1)
             {
-                ftruncate(fd, msg->size);
+                fmsg_file_part_t part;
+                part.uuid         = psync->uuid;
+                part.destination  = msg->uuid;
+                part.id           = msg->id;
+                part.block_number = msg->block_number;
+
+                if (lseek(fd, part.block_number * sizeof part.data, SEEK_SET) >= 0)
+                {
+                    ssize_t size = read(fd, part.data, sizeof part.data);
+                    if (size > 0)
+                    {
+                        part.size = size;
+                        if (fmsgbus_publish(psync->msgbus, FFILE_PART, &part, sizeof part) != FSUCCESS)
+                            FS_ERR("File part message not published");
+                    }
+                    else FS_ERR("File reading failed");
+                }
+                else FS_ERR("lseek failed");
+
                 close(fd);
             }
-            else
-                FS_ERR("Unable to create new file: \'%s\'", path);
+            else FS_ERR("Unable to open the file: \'%s\'", path);
         }
-        else FS_WARN("File path length is too long: \'%s\'", msg->path);
     }
 }
 
@@ -267,29 +176,48 @@ static void fsync_file_part_handler(fsync_t *psync, uint32_t msg_type, fmsg_file
     (void)size;
     if (memcmp(&msg->uuid, &psync->uuid, sizeof psync->uuid) != 0)
     {
-        FS_INFO("File part received from UUID %llx%llx. id=%u, offset=%llu, size=%u", msg->uuid.data.u64[0], msg->uuid.data.u64[1], msg->id, msg->offset, msg->size);
-        // TODO
+        FS_INFO("File part received from UUID %llx%llx. id=%u, block=%u, size=%u", msg->uuid.data.u64[0], msg->uuid.data.u64[1], msg->id, msg->block_number, msg->size);
+
+        char path[FMAX_PATH];
+        size_t len = strlen(psync->dir);
+        strncpy(path, psync->dir, sizeof path);
+        path[len++] = '/';
+
+        if (fdb_sync_file_path(&msg->uuid, msg->id, path + len, sizeof path - len))
+        {
+            int fd = open(path, O_CREAT | O_BINARY | O_WRONLY);
+            if (fd != -1)
+            {
+                if (lseek(fd, msg->block_number * sizeof msg->data, SEEK_SET) >= 0)
+                {
+                    if (write(fd, msg->data, msg->size) < 0)
+                        FS_ERR("Unable to write data into the file: \'%s\'", path);
+                }
+                else FS_ERR("lseek failed");
+
+                close(fd);
+            }
+            else FS_ERR("Unable to open the file: \'%s\'", path);
+        }
     }
 }
 
 static void fsync_msgbus_retain(fsync_t *psync, fmsgbus_t *pmsgbus)
 {
     psync->msgbus = fmsgbus_retain(pmsgbus);
-    fmsgbus_subscribe(psync->msgbus, FNODE_STATUS,           (fmsg_handler_t)fsync_status_handler,            psync);
-    fmsgbus_subscribe(psync->msgbus, FSYNC_FILES_LIST,       (fmsg_handler_t)fsync_sync_files_list_handler,   psync);
-    fmsgbus_subscribe(psync->msgbus, FREQUEST_FILES_CONTENT, (fmsg_handler_t)fsync_req_files_content_handler, psync);
-    fmsgbus_subscribe(psync->msgbus, FFILE_INFO,             (fmsg_handler_t)fsync_file_info_handler,         psync);
-    fmsgbus_subscribe(psync->msgbus, FFILE_PART,             (fmsg_handler_t)fsync_file_part_handler,         psync);
+    fmsgbus_subscribe(psync->msgbus, FNODE_STATUS,          (fmsg_handler_t)fsync_status_handler,            psync);
+    fmsgbus_subscribe(psync->msgbus, FSYNC_FILES_LIST,      (fmsg_handler_t)fsync_sync_files_list_handler,   psync);
+    fmsgbus_subscribe(psync->msgbus, FFILE_PART_REQUEST,    (fmsg_handler_t)fsync_file_part_request_handler, psync);
+    fmsgbus_subscribe(psync->msgbus, FFILE_PART,            (fmsg_handler_t)fsync_file_part_handler,         psync);
 
 }
 
 static void fsync_msgbus_release(fsync_t *psync)
 {
-    fmsgbus_unsubscribe(psync->msgbus, FNODE_STATUS,           (fmsg_handler_t)fsync_status_handler);
-    fmsgbus_unsubscribe(psync->msgbus, FSYNC_FILES_LIST,       (fmsg_handler_t)fsync_sync_files_list_handler);
-    fmsgbus_unsubscribe(psync->msgbus, FREQUEST_FILES_CONTENT, (fmsg_handler_t)fsync_req_files_content_handler);
-    fmsgbus_unsubscribe(psync->msgbus, FFILE_INFO,             (fmsg_handler_t)fsync_file_info_handler);
-    fmsgbus_unsubscribe(psync->msgbus, FFILE_PART,             (fmsg_handler_t)fsync_file_part_handler);
+    fmsgbus_unsubscribe(psync->msgbus, FNODE_STATUS,        (fmsg_handler_t)fsync_status_handler);
+    fmsgbus_unsubscribe(psync->msgbus, FSYNC_FILES_LIST,    (fmsg_handler_t)fsync_sync_files_list_handler);
+    fmsgbus_unsubscribe(psync->msgbus, FFILE_PART_REQUEST,  (fmsg_handler_t)fsync_file_part_request_handler);
+    fmsgbus_unsubscribe(psync->msgbus, FFILE_PART,          (fmsg_handler_t)fsync_file_part_handler);
     fmsgbus_release(psync->msgbus);
 }
 
@@ -297,6 +225,8 @@ static void *fsync_thread(void *param)
 {
     fsync_t *psync = (fsync_t*)param;
     psync->is_active = true;
+
+    size_t len = strlen(psync->dir);
 
     while(psync->is_active)
     {
@@ -314,10 +244,16 @@ static void *fsync_thread(void *param)
         // Copy data from queue into the list
         if (fring_queue_front(psync->events_queue, (void **)&event, &event_size) == FSUCCESS)
         {
-            ffile_info_t file = { 0 };
-            strncpy(file.path, event->path, sizeof file.path);
-            file.mod_time = cur_time;
-            fdb_sync_file_add(&psync->uuid, &file);
+            ffile_info_t info = { 0 };
+            info.id = FINVALID_ID;
+            info.mod_time = cur_time;
+
+            if (fsfile_md5sum(event->path, &info.digest))
+            {
+                strncpy(info.path, event->path + len + 1, sizeof info.path - len - 1);
+                fsfile_size(event->path, &info.size);
+                fdb_sync_file_add(&psync->uuid, &info);
+            }
 
             if (fring_queue_pop_front(psync->events_queue) != FSUCCESS)
                 FS_WARN("Unable to pop the file system event from the queue");
@@ -326,24 +262,49 @@ static void *fsync_thread(void *param)
         // Sync changed files in tree
         if (cur_time - psync->sync_time >= FSYNC_TIMEOUT / 2)
         {
-            fdb_sync_files_iterator_t *it = fdb_sync_files_iterator(&psync->uuid);
-            if (it)
+            fuuid_t uuids[FMAX_CONNECTIONS_NUM];
+            uint32_t uuids_num = fdb_get_uuids(uuids);
+
+            for(uint32_t i = 0; psync->is_active && i < uuids_num; ++i)
             {
-                ffile_info_t info;
-                for (bool ret = fdb_sync_files_iterator_first(it, &info, 0);
-                     ret;
-                     ret = fdb_sync_files_iterator_next(it, &info, 0))
+                if (memcmp(&uuids[i], &psync->uuid, sizeof psync->uuid))
                 {
-                    if (info.sync_time < info.mod_time
-                        && cur_time - info.mod_time >= FSYNC_TIMEOUT)
+                    fmsg_file_part_request_t part_request;
+                    part_request.uuid = psync->uuid;
+                    part_request.destination = uuids[i];
+
+                    fdb_sync_files_iterator_t *it = fdb_sync_files_iterator_diff(&uuids[i], &psync->uuid);
+                    if (it)
                     {
-                        // TODO
-                        FS_INFO("Sync: [%d] %s", info.mod_time, info.path);
-                        info.sync_time = cur_time;
-                        fdb_sync_file_update(&psync->uuid, &info);
+                        ffile_info_t info;
+
+                        for (bool ret = fdb_sync_files_iterator_first(it, &info, 0);
+                             psync->is_active && ret;
+                             ret = fdb_sync_files_iterator_next(it, &info, 0))
+                        {
+                            // if (info.sync_time < info.mod_time
+                            //    && cur_time - info.mod_time >= FSYNC_TIMEOUT)
+
+                            FS_INFO("Sync: [%d] %s", info.mod_time, info.path);
+
+                            part_request.id = info.id;
+
+                            uint32_t const blocks_num = info.size / FSYNC_BLOCK_SIZE + 1;
+                            for (uint32_t i = 0; i < blocks_num; ++i)
+                            {
+                                part_request.block_number = i;
+
+                                if (fmsgbus_publish(psync->msgbus, FFILE_PART_REQUEST, &part_request, sizeof part_request) != FSUCCESS)
+                                    FS_ERR("File part request not published");
+                            }
+
+                            info.sync_time = cur_time;
+                            fdb_sync_file_update(&psync->uuid, &info);
+                        }
+
+                        fdb_sync_files_iterator_free(it);
                     }
                 }
-                fdb_sync_files_iterator_free(it);
             }
 
             psync->sync_time = cur_time;
@@ -359,11 +320,15 @@ static void fsync_scan_dir(fsync_t *psync)
 
     fsiterator_t *it = fsdir_iterator(psync->dir);
 
+    time_t const cur_time = time(0);
+
     for(dirent_t entry; fsdir_iterator_next(it, &entry);)
     {
         if (entry.type == FS_REG)
         {
-            ffile_info_t info;
+            ffile_info_t info = { 0 };
+            info.id = FINVALID_ID;
+            info.mod_time = cur_time;
 
             char full_path[FMAX_PATH];
             size_t full_path_len = fsdir_iterator_full_path(it, &entry, full_path, sizeof full_path);
@@ -372,6 +337,8 @@ static void fsync_scan_dir(fsync_t *psync)
                 if (fsfile_md5sum(full_path, &info.digest))
                 {
                     fsdir_iterator_path(it, &entry, info.path, sizeof info.path);
+                    fsfile_size(full_path, &info.size);
+
                     fdb_sync_file_add(&psync->uuid, &info);
                 }
             }

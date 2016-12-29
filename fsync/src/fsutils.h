@@ -1,6 +1,6 @@
 #ifndef FSUTILS_H_FSYNC
 #define FSUTILS_H_FSYNC
-#include "config.h"
+#include <config.h>
 #include <futils/md5.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -26,7 +26,7 @@ typedef struct
 {
     fsdir_entry_t   type;                   // type
     unsigned short  namlen;                 // Length of name in name
-    char            name[FSMAX_FILENAME];   // File name
+    char            name[FMAX_FILENAME];    // File name
 } dirent_t;
 
 typedef enum fsdir_action
@@ -42,7 +42,7 @@ typedef enum fsdir_action
 typedef struct
 {
     fsdir_action_t  action;
-    char            path[FSMAX_PATH + 1];
+    char            path[FMAX_PATH + 1];
 } fsdir_event_t;
 
 typedef void (*fsdir_evt_handler_t)(fsdir_event_t const *, void *);

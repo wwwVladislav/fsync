@@ -1,5 +1,5 @@
 #include "../../socket.h"
-#include "../../config.h"
+#include <config.h>
 #include <futils/log.h>
 #include <Winsock2.h>
 
@@ -92,7 +92,7 @@ fnet_socket_t fnet_socket_bind(fnet_address_t const *addr)
         return FNET_INVALID_SOCKET;
     }
 
-    if (listen(sock, FNET_SOCK_MAX_CONNECTIONS) == SOCKET_ERROR)
+    if (listen(sock, FMAX_ACCEPT_CONNECTIONS) == SOCKET_ERROR)
     {
         FS_ERR("Socket listen error");
         closesocket(sock);

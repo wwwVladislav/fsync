@@ -1,5 +1,6 @@
 #ifndef MESSAGES_H_FCOMMON
 #define MESSAGES_H_FCOMMON
+#include "config.h"
 #include <futils/uuid.h>
 #include <futils/md5.h>
 
@@ -7,8 +8,7 @@ typedef enum
 {
     FNODE_STATUS = 1,
     FSYNC_FILES_LIST,
-    FREQUEST_FILES_CONTENT,
-    FFILE_INFO,
+    FFILE_PART_REQUEST,
     FFILE_PART
 } fmessage_t;
 
@@ -23,15 +23,12 @@ typedef struct
     uint32_t status;
 } fmsg_node_status_t;
 
-enum
-{
-    FMAX_PATH   = 1024              // Max file path length
-};
-
 typedef struct
 {
-    char    path[FMAX_PATH];
-    fmd5_t  digest;
+    uint32_t id;
+    char     path[FMAX_PATH];
+    fmd5_t   digest;
+    uint64_t size;
 } fsync_file_info_t;
 
 typedef struct
@@ -47,27 +44,18 @@ typedef struct
 {
     fuuid_t             uuid;
     fuuid_t             destination;
-    uint8_t             files_num;
-    char                files[32][FMAX_PATH];
-} fmsg_request_files_content_t;
-
-typedef struct
-{
-    fuuid_t             uuid;
-    fuuid_t             destination;
-    char                path[FMAX_PATH];
     uint32_t            id;
-    uint64_t            size;
-} fmsg_file_info_t;
+    uint32_t            block_number;
+} fmsg_file_part_request_t;
 
 typedef struct
 {
     fuuid_t             uuid;
     fuuid_t             destination;
     uint32_t            id;
+    uint32_t            block_number;
     uint16_t            size;
-    uint64_t            offset;
-    uint8_t             data[64 * 1024];
+    uint8_t             data[FSYNC_BLOCK_SIZE];
 } fmsg_file_part_t;
 
 #endif

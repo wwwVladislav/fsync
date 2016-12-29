@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 2.6)
 project(fnet)
 
 set(FNET_HEADERS
-    src/config.h
     src/ip_address.h
     src/transport.h
     src/tcp_transport.h
@@ -12,7 +11,6 @@ set(FNET_HEADERS
 )
 
 set(FNET_SOURCES
-    src/config.c
     src/ip_address.c
     src/transport.c
     src/tcp_transport.c
@@ -34,6 +32,7 @@ message (STATUS "OPENSSL_INCLUDE_DIR = ${OPENSSL_INCLUDE_DIR}")
 include_directories(
     ${OPENSSL_INCLUDE_DIR}
     ../futils/include
+    ../fcommon/include
 )
 
 set(FNET_LIBS

@@ -11,6 +11,7 @@ set(FDB_SOURCES
 
 include_directories(
     ../futils/include
+    ../fcommon/include
 )
 
 use_c99()

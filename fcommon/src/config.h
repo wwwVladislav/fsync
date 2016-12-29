@@ -9,7 +9,7 @@ enum
     FMAX_DIR_DEPTH              = 512,      // Max directories depth
     FSYNC_TIMEOUT               = 10,       // Timeout for file synchronization after changing (sec)
     FMAX_ACCEPT_CONNECTIONS     = 10,       // Maximum number of accepted connections
-    FSYNC_BLOCK_SIZE            = 64 * 1024 // synchronization blocks size
+    FSYNC_BLOCK_SIZE            = 4 * 1024  // synchronization blocks size
 };
 
 #endif

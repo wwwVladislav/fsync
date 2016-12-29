@@ -104,6 +104,7 @@ bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t const *info)
         (*inf)->info.sync_time = info->sync_time;
         (*inf)->info.digest = info->digest;
         (*inf)->info.size = info->size;
+        (*inf)->info.is_exist = info->is_exist;
         ret = true;
     }
 
@@ -141,6 +142,31 @@ bool fdb_sync_file_del(fuuid_t const *uuid, char const *path)
     return ret;
 }
 
+bool fdb_sync_file_get(fuuid_t const *uuid, char const *path, ffile_info_t *info)
+{
+    fdb_init();
+
+    bool ret = false;
+
+    fsdb_push_lock(sync.mutex);
+
+    fdb_file_info_t key = { *uuid };
+    strncpy(key.info.path, path, sizeof key.info.path);
+
+    fdb_file_info_t const *pkey = &key;
+    fdb_file_info_t **inf = (fdb_file_info_t **)bsearch(&pkey, sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
+
+    if (inf)
+    {
+        *info = (*inf)->info;
+        ret = true;
+    }
+
+    fsdb_pop_lock();
+
+    return ret;
+}
+
 bool fdb_sync_file_del_all(fuuid_t const *uuid)
 {
     // TODO
@@ -165,6 +191,7 @@ bool fdb_sync_file_update(fuuid_t const *uuid, ffile_info_t const *info)
         (*inf)->info.sync_time = info->sync_time;
         (*inf)->info.digest = info->digest;
         (*inf)->info.size = info->size;
+        (*inf)->info.is_exist = info->is_exist;
     }
 
     fsdb_pop_lock();

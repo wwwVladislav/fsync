@@ -9,9 +9,8 @@
 
 typedef struct
 {
-    uint32_t id;                // Unique for node id
     char     path[FMAX_PATH];   // Path
-
+    uint32_t id;                // Unique for node id
     time_t   mod_time;          // Modification time
     time_t   sync_time;         // Synchronization time
     fmd5_t   digest;            // MD5 sum
@@ -22,8 +21,10 @@ typedef struct
 typedef struct fdb_syncfiles_iterator fdb_sync_files_iterator_t;
 
 bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t const *info);
+bool fdb_sync_file_add_unique(fuuid_t const *uuid, ffile_info_t const *info);
 bool fdb_sync_file_del(fuuid_t const *uuid, char const *path);
 bool fdb_sync_file_get(fuuid_t const *uuid, char const *path, ffile_info_t *info);
+bool fdb_sync_file_get_if_not_exist(fuuid_t const *uuid, ffile_info_t *info);
 bool fdb_sync_file_del_all(fuuid_t const *uuid);
 bool fdb_sync_file_update(fuuid_t const *uuid, ffile_info_t const *info);
 bool fdb_sync_file_path(fuuid_t const *uuid, uint32_t id, char *path, size_t size);

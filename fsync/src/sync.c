@@ -24,23 +24,27 @@
 enum
 {
     FSYNC_FILES_LIST_SIZE   = 1000,                     // Max number of files for sync
-    FSYNC_QUEUEBUF_SIZE     = 256 * 1024
+    FSYNC_MAX_QUEUE_ITEMS   = 256,
+    FSYNC_QUEUEBUF_SIZE     = FSYNC_MAX_QUEUE_ITEMS * sizeof(fsdir_event_t)
 };
 
 struct fsync
 {
-    volatile bool        is_active;
-
     fuuid_t              uuid;
     char                 dir[FMAX_PATH];
 
-    sem_t                events_sem;                                                                         // semaphore for events waiting
-    fring_queue_t       *events_queue;                                                                       // events queue
-    char                 queue_buf[FSYNC_QUEUEBUF_SIZE];                                                     // buffer for file events queue
+    volatile bool        is_events_queue_processing_active;
+    pthread_t            events_queue_processing_thread;
+    sem_t                events_queue_sem;                                                                  // semaphore for events waiting
+    fring_queue_t       *events_queue;                                                                      // events queue
+    char                 events_queue_buf[FSYNC_QUEUEBUF_SIZE];                                             // buffer for file events queue
 
-    pthread_t            thread;
+    volatile bool        is_sync_active;
+    pthread_t            sync_thread;
+    sem_t                sync_sem;
+    fcomposer_t          file_composer;
+
     fsdir_listener_t    *dir_listener;
-    time_t               sync_time;
 
     fmsgbus_t           *msgbus;
 
@@ -59,7 +63,7 @@ static void fsdir_evt_handler(fsdir_event_t const *event, void *arg)
 {
     fsync_t *psync = (fsync_t*)arg;
     if (fring_queue_push_back(psync->events_queue, event, offsetof(fsdir_event_t, path) + strlen(event->path) + 1) == FSUCCESS)
-        sem_post(&psync->events_sem);
+        sem_post(&psync->events_queue_sem);
     else
         FS_WARN("Unable to push the file system event into the queue");
 }
@@ -79,7 +83,7 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
         bool have_diff = false;
 
         for (bool ret = fdb_sync_files_iterator_first(it, &info, 0);
-             psync->is_active && ret;
+             psync->is_events_queue_processing_active && ret;
              ret = fdb_sync_files_iterator_next(it, &info, 0))
         {
             have_diff = true;
@@ -128,7 +132,7 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
             ffile_info_t info;
 
             for (bool ret = fdb_sync_files_iterator_first(it, &info, 0);
-                 psync->is_active && ret;
+                 psync->is_events_queue_processing_active && ret;
                  ret = fdb_sync_files_iterator_next(it, &info, 0))
             {
                 fsync_file_info_t *file_info = &files_list.files[files_list.files_num];
@@ -163,6 +167,7 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
         FS_INFO("UUID %llx%llx sent files list for synchronization", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
 
         time_t const cur_time = time(0);
+        bool is_need_sync = false;
 
         for(uint32_t i = 0; i < msg->files_num; ++i)
         {
@@ -182,16 +187,18 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
                 own_file_info.id = FINVALID_ID;
                 own_file_info.is_exist = false;
                 fdb_sync_file_add(&psync->uuid, &own_file_info);
+                is_need_sync = true;
             }
-            else
+            else if (memcmp(&own_file_info.digest, &info.digest, sizeof info.digest) != 0)
             {
-                if (memcmp(&own_file_info.digest, &info.digest, sizeof info.digest) != 0)
-                {
-                    own_file_info.is_exist = false;
-                    fdb_sync_file_add(&psync->uuid, &own_file_info);
-                }
+                own_file_info.is_exist = false;
+                fdb_sync_file_add(&psync->uuid, &own_file_info);
+                is_need_sync = true;
             }
         }
+
+        if (is_need_sync)
+            sem_post(&psync->sync_sem);
 
         if (msg->is_last)
             fsync_notify_files_diff(psync, &msg->uuid);
@@ -296,97 +303,114 @@ static void fsync_msgbus_release(fsync_t *psync)
 static void *fsync_thread(void *param)
 {
     fsync_t *psync = (fsync_t*)param;
-    psync->is_active = true;
+    psync->is_sync_active = true;
+
+    while(psync->is_sync_active)
+    {
+        while (sem_wait(&psync->sync_sem) == -1 && errno == EINTR)
+            continue;       // Restart if interrupted by handler
+
+        ffile_info_t file_info;
+        while (psync->is_sync_active && !fdb_sync_file_get_if_not_exist(&psync->uuid, &file_info))
+        {
+            // TODO: Find all active nodes.
+            // Now we get all nodes.
+
+            psync->file_composer.is_active = true;
+            psync->file_composer.msgbus = psync->msgbus;
+            psync->file_composer.nodes_num = fdb_get_uuids(&psync->file_composer.nodes);
+            psync->file_composer.file_id = file_info.id;
+            psync->file_composer.file_size = file_info.size;
+            strncpy(psync->file_composer.path, file_info.path, sizeof file_info.path);
+
+            // Find all nodes where the file is exist
+            // Request parts from active nodes
+        }
+
+        psync->file_composer.is_active = false;
+    }
+
+    return false;
+}
+
+static void *fsync_events_queue_processing_thread(void *param)
+{
+    fsync_t *psync = (fsync_t*)param;
+    psync->is_events_queue_processing_active = true;
 
     size_t len = strlen(psync->dir);
 
-    while(psync->is_active)
+    while(psync->is_events_queue_processing_active)
     {
-        struct timespec tm = { time(0) + FSYNC_TIMEOUT / 2, 0 };
-        while (sem_timedwait(&psync->events_sem, &tm) == -1 && errno == EINTR)
+        while (sem_wait(&psync->events_queue_sem) == -1 && errno == EINTR)
             continue;       // Restart if interrupted by handler
 
-        if (!psync->is_active)
+        if (!psync->is_events_queue_processing_active)
             break;
 
         time_t const cur_time = time(0);
         fsdir_event_t *event = 0;
         uint32_t event_size = 0;
 
+        uint32_t new_files_num = 0;
+        ffile_info_t new_files[FSYNC_MAX_QUEUE_ITEMS];
+
         // Copy data from queue into the list
         if (fring_queue_front(psync->events_queue, (void **)&event, &event_size) == FSUCCESS)
         {
-            ffile_info_t info = { 0 };
-            info.id = FINVALID_ID;
-            info.mod_time = cur_time;
-            info.is_exist = true;
-
-            if (fsfile_md5sum(event->path, &info.digest))
+            switch(event->action)
             {
-                strncpy(info.path, event->path + len + 1, sizeof info.path - len - 1);
-                fsfile_size(event->path, &info.size);
-                fdb_sync_file_add(&psync->uuid, &info);
+                case FSDIR_ACTION_ADDED:
+                {
+                    ffile_info_t info = { 0 };
+                    info.id = FINVALID_ID;
+                    info.mod_time = cur_time;
+                    info.is_exist = true;
+
+                    if (fsfile_md5sum(event->path, &info.digest))
+                    {
+                        strncpy(info.path, event->path + len + 1, sizeof info.path - len - 1);
+                        fsfile_size(event->path, &info.size);
+                        if (fdb_sync_file_add_unique(&psync->uuid, &info))
+                            memcpy(&new_files[new_files_num++], &info, sizeof info);
+                    }
+
+                    break;
+                }
+
+                case FSDIR_ACTION_REMOVED:  // TODO: remove file from other nodes
+                case FSDIR_ACTION_MODIFIED: // TODO: use rsync for differences synchronization
+                case FSDIR_ACTION_RENAMED:  // TODO: rename for other nodes
+                case FSDIR_ACTION_REOPENED: // TODO: rescan whole directory
+                default:
+                    break;
             }
 
             if (fring_queue_pop_front(psync->events_queue) != FSUCCESS)
                 FS_WARN("Unable to pop the file system event from the queue");
         }
 
-        // Sync changed files in tree
-        if (cur_time - psync->sync_time >= FSYNC_TIMEOUT / 2)
+        // Notify other nodes
+/*
+        fuuid_t uuids[FMAX_CONNECTIONS_NUM];
+        uint32_t nodes_num = fdb_get_uuids(&uuids);
+
+        for(uint32_t i = 0; i < new_files_num; ++i)
         {
-            ///fuuid_t uuids[FMAX_CONNECTIONS_NUM];
-            ///uint32_t uuids_num = fdb_get_uuids(uuids);
+            ffile_info_t *info = &new_files[i];
+            info->id = FINVALID_ID;
+            info->is_exist = false;
 
-            ///for(uint32_t i = 0; psync->is_active && i < uuids_num; ++i)
-            ///{
-            ///    if (memcmp(&uuids[i], &psync->uuid, sizeof psync->uuid))
-            ///    {
-                    /// fmsg_file_part_request_t part_request;
-                    /// part_request.uuid = psync->uuid;
-                    /// part_request.destination = uuids[i];
-
-            ///        fdb_sync_files_iterator_t *it = fdb_sync_files_iterator_diff(&uuids[i], &psync->uuid);
-            ///        if (it)
-            ///        {
-            ///            ffile_info_t info;
-
-            ///            for (bool ret = fdb_sync_files_iterator_first(it, &info, 0);
-            ///                 psync->is_active && ret;
-            ///                 ret = fdb_sync_files_iterator_next(it, &info, 0))
-            ///            {
-                            // if (info.sync_time < info.mod_time
-                            //    && cur_time - info.mod_time >= FSYNC_TIMEOUT)
-
-            ///                FS_INFO("Sync: [%d] %s", info.mod_time, info.path);
-
-                            /// part_request.id = info.id;
-
-                            /// uint32_t const blocks_num = info.size / FSYNC_BLOCK_SIZE + 1;
-                            /// for (uint32_t i = 0; i < blocks_num; ++i)
-                            /// {
-                            ///     part_request.block_number = i;
-
-                            ///     if (fmsgbus_publish(psync->msgbus, FFILE_PART_REQUEST, &part_request, sizeof part_request) != FSUCCESS)
-                            ///         FS_ERR("File part request not published");
-
-                                // workaround for messages queue overflow
-                            ///     static struct timespec const ts = { 0, 10000000 };
-                            ///     nanosleep(&ts, NULL);
-                            /// }
-
-                            /// info.sync_time = cur_time;
-                            /// fdb_sync_file_update(&psync->uuid, &info);
-            ///            }
-
-            ///            fdb_sync_files_iterator_free(it);
-            ///        }
-            ///    }
-            /// }
-
-            psync->sync_time = cur_time;
+            for(uint32_t j = 0; j < nodes_num; ++j)
+            {
+                if (fdb_sync_file_add_unique(&uuids[j], info))
+                {
+                    // TODO
+                }
+            }
         }
-    }
+*/
+    }   // while(psync->is_active)
 
     return 0;
 }
@@ -467,24 +491,31 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
 
     fsync_msgbus_retain(psync, pmsgbus);
 
-    if (fring_queue_create(psync->queue_buf, sizeof psync->queue_buf, &psync->events_queue) != FSUCCESS)
+    if (fring_queue_create(psync->events_queue_buf, sizeof psync->events_queue_buf, &psync->events_queue) != FSUCCESS)
     {
         FS_ERR("The file system events queue isn't created");
         free(psync);
         return 0;
     }
 
-    if (sem_init(&psync->events_sem, 0, 0) == -1)
+    if (sem_init(&psync->events_queue_sem, 0, 0) == -1)
     {
         FS_ERR("The semaphore initialization is failed");
-        free(psync);
+        fsync_free(psync);
+        return 0;
+    }
+
+    if (sem_init(&psync->sync_sem, 0, 0) == -1)
+    {
+        FS_ERR("The semaphore initialization is failed");
+        fsync_free(psync);
         return 0;
     }
 
     psync->dir_listener = fsdir_listener_create();
     if (!psync->dir_listener)
     {
-        free(psync);
+        fsync_free(psync);
         return 0;
     }
 
@@ -500,7 +531,20 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
         return 0;
     }
 
-    int rc = pthread_create(&psync->thread, 0, fsync_thread, (void*)psync);
+    static struct timespec const one_sec = { 1, 0 };
+
+    int rc = pthread_create(&psync->sync_thread, 0, fsync_thread, (void*)psync);
+    if (rc)
+    {
+        FS_ERR("Unable to create the thread for directories synchronization. Error: %d", rc);
+        fsync_free(psync);
+        return 0;
+    }
+
+    while(!psync->is_sync_active)
+        nanosleep(&one_sec, NULL);
+
+    rc = pthread_create(&psync->events_queue_processing_thread, 0, fsync_events_queue_processing_thread, (void*)psync);
     if (rc)
     {
         FS_ERR("Unable to create the thread for directories synchronization. Error: %d", rc);
@@ -510,9 +554,8 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
 
     fsync_scan_dir(psync);
 
-    static struct timespec const ts = { 1, 0 };
-    while(!psync->is_active)
-        nanosleep(&ts, NULL);
+    while(!psync->is_events_queue_processing_active)
+        nanosleep(&one_sec, NULL);
 
     fmsg_node_status_t const status = { *uuid, FSTATUS_READY4SYNC };
     if (fmsgbus_publish(psync->msgbus, FNODE_STATUS, &status, sizeof status) != FSUCCESS)
@@ -525,15 +568,24 @@ void fsync_free(fsync_t *psync)
 {
     if (psync)
     {
-        if (psync->is_active)
+        if (psync->is_sync_active)
         {
-            psync->is_active = false;
-            sem_post(&psync->events_sem);
-            pthread_join(psync->thread, 0);
+            psync->is_sync_active = false;
+            sem_post(&psync->sync_sem);
+            pthread_join(psync->sync_thread, 0);
         }
+
+        if (psync->is_events_queue_processing_active)
+        {
+            psync->is_events_queue_processing_active = false;
+            sem_post(&psync->events_queue_sem);
+            pthread_join(psync->events_queue_processing_thread, 0);
+        }
+
         fsdir_listener_free(psync->dir_listener);
         fring_queue_free(psync->events_queue);
-        sem_destroy(&psync->events_sem);
+        sem_destroy(&psync->events_queue_sem);
+        sem_destroy(&psync->sync_sem);
         fsync_msgbus_release(psync);
         free(psync);
     }

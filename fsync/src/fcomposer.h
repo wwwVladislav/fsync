@@ -6,6 +6,7 @@
 
 typedef struct
 {
+    bool       is_active;
     fmsgbus_t *msgbus;
     uint32_t   nodes_num;
     fuuid_t    nodes[FMAX_CONNECTIONS_NUM];

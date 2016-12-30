@@ -42,7 +42,7 @@ typedef enum fsdir_action
 typedef struct
 {
     fsdir_action_t  action;
-    char            path[FMAX_PATH + 1];
+    char            path[FMAX_PATH];
 } fsdir_event_t;
 
 typedef void (*fsdir_evt_handler_t)(fsdir_event_t const *, void *);

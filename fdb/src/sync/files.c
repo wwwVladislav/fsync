@@ -100,12 +100,48 @@ bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t const *info)
     }
     else
     {
+        (*inf)->info.id = info->id;
         (*inf)->info.mod_time = info->mod_time;
         (*inf)->info.sync_time = info->sync_time;
         (*inf)->info.digest = info->digest;
         (*inf)->info.size = info->size;
         (*inf)->info.is_exist = info->is_exist;
         ret = true;
+    }
+
+    fsdb_pop_lock();
+
+    return ret;
+}
+
+bool fdb_sync_file_add_unique(fuuid_t const *uuid, ffile_info_t const *info)
+{
+    fdb_init();
+
+    bool ret = false;
+
+    fsdb_push_lock(sync.mutex);
+
+    fdb_file_info_t const key = { *uuid, *info };
+    fdb_file_info_t const *pkey = &key;
+    fdb_file_info_t **inf = (fdb_file_info_t **)bsearch(&pkey, sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
+
+    if (!inf)
+    {
+        fdb_file_info_t *file = (fdb_file_info_t *)fstatic_alloc(sync.files_list_allocator);
+
+        if (file)
+        {
+            memcpy(&file->uuid, uuid, sizeof *uuid);
+            memcpy(&file->info, info, sizeof *info);
+            if (file->info.id == FINVALID_ID)
+                file->info.id = sync.next_id++;
+            sync.files_list[sync.files_list_size++] = file;
+            qsort(sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
+            ret = true;
+        }
+        else
+            FS_WARN("Unable to allocate memory for changed file name");
     }
 
     fsdb_pop_lock();
@@ -167,6 +203,30 @@ bool fdb_sync_file_get(fuuid_t const *uuid, char const *path, ffile_info_t *info
     return ret;
 }
 
+bool fdb_sync_file_get_if_not_exist(fuuid_t const *uuid, ffile_info_t *info)
+{
+    fdb_init();
+
+    bool ret = false;
+
+    fsdb_push_lock(sync.mutex);
+
+    for(size_t i = 0; i < sync.files_list_size; ++i)
+    {
+        if (memcmp(&sync.files_list[i]->uuid, uuid, sizeof *uuid) == 0
+            && !sync.files_list[i]->info.is_exist)
+        {
+            memcpy(info, &sync.files_list[i]->info, sizeof *info);
+            ret = true;
+            break;
+        }
+    }
+
+    fsdb_pop_lock();
+
+    return ret;
+}
+
 bool fdb_sync_file_del_all(fuuid_t const *uuid)
 {
     // TODO
@@ -187,6 +247,7 @@ bool fdb_sync_file_update(fuuid_t const *uuid, ffile_info_t const *info)
 
     if (inf)
     {
+        (*inf)->info.id = info->id;
         (*inf)->info.mod_time = info->mod_time;
         (*inf)->info.sync_time = info->sync_time;
         (*inf)->info.digest = info->digest;

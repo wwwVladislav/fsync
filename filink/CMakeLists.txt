@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 3.1)
 project(filink)
 
 set(FILINK_HEADERS
@@ -11,9 +11,13 @@ set(FILINK_SOURCES
     src/protocol.c
 )
 
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 set(FILINK_LIBS
     futils
     fnet
+    Threads::Threads
 )
 
 include_directories(

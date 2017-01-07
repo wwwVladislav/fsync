@@ -5,7 +5,7 @@
 # cmake -DCMAKE_BUILD_TYPE=MinSizeRel CMakeLists.txt
 # cmake -DCMAKE_BUILD_TYPE=Debug -G "MinGW Makefiles" .
 
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 3.1)
 project(fsync)
 
 set(FSYNC_MAJOR_VERSION 1)

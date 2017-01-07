@@ -3,6 +3,7 @@
 #include <futils/static_allocator.h>
 #include <futils/log.h>
 #include <string.h>
+#include <config.h>
 #include <stdlib.h>
 #include <pthread.h>
 
@@ -10,7 +11,9 @@
 
 enum
 {
-    FDB_FILES_LIST_SIZE   = 10000   // Max number of files for sync for all nodes
+    FDB_FILES_LIST_SIZE     = 10000,    // Max number of files for sync for all nodes
+    FDB_MAX_REQUESTED_PARTS =   128,     // Max number of requested parts
+    FDB_MAX_SYNC_FILES      =   64,      // Max number of synchronized files
 };
 
 typedef struct
@@ -21,12 +24,32 @@ typedef struct
 
 typedef struct
 {
+    uint32_t    file_id;
+    time_t      requested_time;
+    uint32_t    part;
+} fdb_requested_part_t;
+
+typedef struct
+{
+    uint32_t    file_id;
+    uint64_t    size;
+    uint64_t    received_size;
+    uint32_t    threshold_delta_time;
+    uint32_t    requested_parts_threshold;
+} fdb_sync_file_t;
+
+typedef struct
+{
     pthread_mutex_t      mutex;
     char                 fla_buf[FSTATIC_ALLOCATOR_MEM_NEED(FDB_FILES_LIST_SIZE, sizeof(fdb_file_info_t))]; // buffer for files list allocator
     fstatic_allocator_t *files_list_allocator;                                                              // files list allocator
     fdb_file_info_t     *files_list[FDB_FILES_LIST_SIZE];                                                   // files list
     size_t               files_list_size;                                                                   // files list size
-    uint32_t             next_id;
+    uint32_t             next_id;                                                                           // id generator
+    fdb_sync_file_t      sync_files[FDB_MAX_SYNC_FILES];                                                    // synchronized files
+    uint32_t             sync_files_size;                                                                   // number of synchronized files
+    fdb_requested_part_t requested_parts[FDB_MAX_REQUESTED_PARTS];                                          // requested parts
+    uint32_t             requested_parts_size;                                                              // number of requested parts
 } fdb_sync_files_t;
 
 static fdb_sync_files_t sync;
@@ -69,7 +92,7 @@ static void fdb_init()
     sync.mutex = mutex_initializer;
 }
 
-bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t const *info)
+bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t *info)
 {
     fdb_init();
 
@@ -90,7 +113,7 @@ bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t const *info)
             memcpy(&file->uuid, uuid, sizeof *uuid);
             memcpy(&file->info, info, sizeof *info);
             if (file->info.id == FINVALID_ID)
-                file->info.id = sync.next_id++;
+                info->id = file->info.id = sync.next_id++;
             sync.files_list[sync.files_list_size++] = file;
             qsort(sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
             ret = true;
@@ -105,7 +128,7 @@ bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t const *info)
         (*inf)->info.sync_time = info->sync_time;
         (*inf)->info.digest = info->digest;
         (*inf)->info.size = info->size;
-        (*inf)->info.is_exist = info->is_exist;
+        (*inf)->info.status = info->status;
         ret = true;
     }
 
@@ -114,7 +137,7 @@ bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t const *info)
     return ret;
 }
 
-bool fdb_sync_file_add_unique(fuuid_t const *uuid, ffile_info_t const *info)
+bool fdb_sync_file_add_unique(fuuid_t const *uuid, ffile_info_t *info)
 {
     fdb_init();
 
@@ -135,7 +158,7 @@ bool fdb_sync_file_add_unique(fuuid_t const *uuid, ffile_info_t const *info)
             memcpy(&file->uuid, uuid, sizeof *uuid);
             memcpy(&file->info, info, sizeof *info);
             if (file->info.id == FINVALID_ID)
-                file->info.id = sync.next_id++;
+                info->id = file->info.id = sync.next_id++;
             sync.files_list[sync.files_list_size++] = file;
             qsort(sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
             ret = true;
@@ -214,7 +237,7 @@ bool fdb_sync_file_get_if_not_exist(fuuid_t const *uuid, ffile_info_t *info)
     for(size_t i = 0; i < sync.files_list_size; ++i)
     {
         if (memcmp(&sync.files_list[i]->uuid, uuid, sizeof *uuid) == 0
-            && !sync.files_list[i]->info.is_exist)
+            && !(sync.files_list[i]->info.status & FFILE_IS_EXIST))
         {
             memcpy(info, &sync.files_list[i]->info, sizeof *info);
             ret = true;
@@ -252,7 +275,7 @@ bool fdb_sync_file_update(fuuid_t const *uuid, ffile_info_t const *info)
         (*inf)->info.sync_time = info->sync_time;
         (*inf)->info.digest = info->digest;
         (*inf)->info.size = info->size;
-        (*inf)->info.is_exist = info->is_exist;
+        (*inf)->info.status = info->status;
     }
 
     fsdb_pop_lock();
@@ -403,6 +426,7 @@ bool fdb_sync_files_iterator_first(fdb_sync_files_iterator_t *piterator, ffile_i
                         ret = true;
                         break;
                     }
+/*
                     else if (memcmp(&sync.files_list[piterator->idx]->info.digest, &(*inf)->info.digest, sizeof (*inf)->info.digest))
                     {
                         if (diff_kind)
@@ -410,6 +434,7 @@ bool fdb_sync_files_iterator_first(fdb_sync_files_iterator_t *piterator, ffile_i
                         ret = true;
                         break;
                     }
+*/
                 }
             }
 
@@ -534,4 +559,212 @@ uint32_t fdb_get_uuids(fuuid_t uuids[FMAX_CONNECTIONS_NUM])
     fsdb_pop_lock();
 
     return n;
+}
+
+uint32_t fdb_get_uuids_where_file_is_exist(fuuid_t uuids[FMAX_CONNECTIONS_NUM], uint32_t ids[FMAX_CONNECTIONS_NUM], char const *path)
+{
+    fdb_init();
+
+    uint32_t n = 0;
+
+    fsdb_push_lock(sync.mutex);
+
+    for(size_t i = 0; i < sync.files_list_size; ++i)
+    {
+        if (strncmp(path, sync.files_list[i]->info.path, sizeof sync.files_list[i]->info.path) == 0
+            && (sync.files_list[i]->info.status & FFILE_IS_EXIST))
+        {
+            uuids[n] = sync.files_list[i]->uuid;
+            ids[n] = sync.files_list[i]->info.id;
+            ++n;
+        }
+    }
+
+    fsdb_pop_lock();
+
+    return n;
+}
+
+bool fdb_sync_start(uint32_t id, uint32_t threshold_delta_time, uint32_t requested_parts_threshold, uint64_t size)
+{
+    fdb_init();
+
+    bool ret = false;
+
+    fsdb_push_lock(sync.mutex);
+
+    for(uint32_t i = 0; i < sync.sync_files_size; ++i)
+    {
+        if (sync.sync_files[i].file_id == id)
+        {
+            ret = true;
+            break;
+        }
+    }
+
+    if (!ret && sync.sync_files_size < sizeof sync.sync_files / sizeof *sync.sync_files)
+    {
+        sync.sync_files[sync.sync_files_size].file_id = id;
+        sync.sync_files[sync.sync_files_size].received_size = 0;
+        sync.sync_files[sync.sync_files_size].size = size;
+        sync.sync_files[sync.sync_files_size].threshold_delta_time = threshold_delta_time;
+        sync.sync_files[sync.sync_files_size].requested_parts_threshold = requested_parts_threshold;
+        sync.sync_files_size++;
+        ret = true;
+    }
+
+    fsdb_pop_lock();
+
+    return ret;
+}
+
+bool fdb_sync_next_part(uint32_t id, uint32_t *part, bool *completed)
+{
+    fdb_init();
+
+    *completed = false;
+
+    bool ret = false;
+
+    fsdb_push_lock(sync.mutex);
+
+    fdb_sync_file_t *sync_file = 0;
+
+    for(uint32_t i = 0; i < sync.sync_files_size; ++i)
+    {
+        if (sync.sync_files[i].file_id == id)
+        {
+            sync_file = &sync.sync_files[i];
+            break;
+        }
+    }
+
+    if (sync_file && sync_file->received_size < sync_file->size)
+    {
+        time_t const now = time(0);
+
+        uint32_t requested_parts = 0;
+        int expired_request = -1;
+        int last_requested_part = -1;
+
+        for(int i = 0; i < sync.requested_parts_size; ++i)
+        {
+            uint32_t const delta_time = now - sync.requested_parts[i].requested_time;
+            if (delta_time < sync_file->threshold_delta_time)
+            {
+                requested_parts++;
+                if (id == sync.requested_parts[i].file_id)
+                    last_requested_part = i;
+            }
+            else if (id == sync.requested_parts[i].file_id && expired_request == -1)
+                expired_request = i;
+        }
+
+        if (requested_parts < sync_file->requested_parts_threshold)
+        {
+            if (expired_request != -1)
+            {
+                sync.requested_parts[expired_request].requested_time = now;
+                *part = sync.requested_parts[expired_request].part;
+                ret = true;
+            }
+            else
+            {
+                uint32_t const next_part = last_requested_part != -1 ? sync.requested_parts[last_requested_part].part + 1 : (sync_file->received_size / FSYNC_BLOCK_SIZE);
+                uint64_t const psize = (uint64_t)next_part * FSYNC_BLOCK_SIZE;
+                if (psize < sync_file->size)
+                {
+                    sync.requested_parts[sync.requested_parts_size].file_id = id;
+                    sync.requested_parts[sync.requested_parts_size].part = next_part;
+                    sync.requested_parts[sync.requested_parts_size].requested_time = now;
+                    sync.requested_parts_size++;
+                    *part = next_part;
+                    ret = true;
+                }
+            }
+        }
+    }
+    else
+        *completed = true;
+
+    fsdb_pop_lock();
+
+    return ret;
+}
+
+void fdb_sync_part_received(fuuid_t const *uuid, uint32_t id, uint32_t part)
+{
+    fdb_init();
+
+    fsdb_push_lock(sync.mutex);
+
+    fdb_sync_file_t *sync_file = 0;
+
+    for(uint32_t i = 0; i < sync.sync_files_size; ++i)
+    {
+        if (sync.sync_files[i].file_id == id)
+        {
+            sync_file = &sync.sync_files[i];
+            break;
+        }
+    }
+
+    if (sync_file && sync.requested_parts_size)
+    {
+        int i = 0;
+        int first_requested_part = -1;
+
+        for(; i < sync.requested_parts_size; ++i)
+        {
+            if (sync.requested_parts[i].file_id == id)
+            {
+                if (first_requested_part == -1)
+                    first_requested_part = i;
+                if (sync.requested_parts[i].part == part)
+                    break;
+            }
+        }
+
+        if (first_requested_part == i)
+        {
+            uint32_t j = (uint32_t)first_requested_part + 1;
+            for(; j < sync.requested_parts_size; ++j)
+            {
+                if (sync.requested_parts[j].file_id == id)
+                    break;
+            }
+
+            if(j < sync.requested_parts_size)
+                sync_file->received_size += (j - i) * FSYNC_BLOCK_SIZE;
+            else
+                sync_file->received_size += FSYNC_BLOCK_SIZE;
+        }
+
+        if (i < sync.requested_parts_size)
+        {
+            for(++i; i < sync.requested_parts_size; ++i)
+                sync.requested_parts[i - 1] = sync.requested_parts[i];
+            --sync.requested_parts_size;
+        }
+
+        if (sync_file->received_size >= sync_file->size)
+        {
+            uint32_t i = sync_file - sync.sync_files;
+            for(++i; i < sync.sync_files_size; ++i)
+                sync.sync_files[i - 1] = sync.sync_files[i];
+            --sync.sync_files_size;
+
+            for(uint32_t i = 0; i < sync.files_list_size; ++i)
+            {
+                if (memcmp(&sync.files_list[i]->uuid, uuid, sizeof *uuid) == 0
+                    && sync.files_list[i]->info.id == id)
+                {
+                    sync.files_list[i]->info.status |= FFILE_IS_EXIST;
+                    break;
+                }
+            }
+        }
+    }
+
+    fsdb_pop_lock();
 }

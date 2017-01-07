@@ -5,13 +5,11 @@ set(FSYNC_HEADERS
     src/device.h
     src/fsutils.h
     src/sync.h
-    src/fcomposer.h
 )
 
 set(FSYNC_SOURCES
     src/fsutils.c
     src/sync.c
-    src/fcomposer.c
 )
 
 set(FSYNC_SOURCES

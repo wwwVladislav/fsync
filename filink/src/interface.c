@@ -158,9 +158,10 @@ static void filink_sync_files_list_handler(filink_t *ilink, uint32_t msg_type, f
 
         for(uint32_t i = 0; i < msg->files_num; ++i)
         {
-            pmsg.files[i].id     = msg->files[i].id;
-            pmsg.files[i].digest = msg->files[i].digest;
-            pmsg.files[i].size   = msg->files[i].size;
+            pmsg.files[i].id       = msg->files[i].id;
+            pmsg.files[i].digest   = msg->files[i].digest;
+            pmsg.files[i].size     = msg->files[i].size;
+            pmsg.files[i].is_exist = msg->files[i].is_exist;
             memcpy(pmsg.files[i].path, msg->files[i].path, sizeof msg->files[i].path);
         }
 
@@ -236,9 +237,10 @@ static void fproto_sync_files_list_handler(filink_t *ilink, fproto_sync_files_li
 
     for(uint32_t i = 0; i < pmsg->files_num; ++i)
     {
-        msg.files[i].id     = pmsg->files[i].id;
-        msg.files[i].digest = pmsg->files[i].digest;
-        msg.files[i].size   = pmsg->files[i].size;
+        msg.files[i].id       = pmsg->files[i].id;
+        msg.files[i].digest   = pmsg->files[i].digest;
+        msg.files[i].size     = pmsg->files[i].size;
+        msg.files[i].is_exist = pmsg->files[i].is_exist;
         memcpy(msg.files[i].path, pmsg->files[i].path, sizeof pmsg->files[i].path);
     }
 

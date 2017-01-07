@@ -9,6 +9,8 @@
 #include <semaphore.h>
 #include <errno.h>
 
+static struct timespec const F1_MSEC = { 0, 1000000 };
+
 enum
 {
     FMSGBUS_MSG = 0,
@@ -195,6 +197,11 @@ static void *fmsgbus_ctrl_thread(void *param)
                     fmsgbus_msg_t *msg = (fmsgbus_msg_t *)data;
                     if (fmsgbus_msg_handle(msgbus, msg->msg_type, msg->msg_data, msg->msg_size))
                         fring_queue_pop_front(msgbus->messages);
+                    else
+                    {
+                        nanosleep(&F1_MSEC, NULL);
+                        sem_post(&msgbus->messages_sem);
+                    }
                     break;
                 }
 

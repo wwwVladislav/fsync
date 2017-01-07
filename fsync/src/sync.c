@@ -1,6 +1,5 @@
 #include "sync.h"
 #include "fsutils.h"
-#include "fcomposer.h"
 #include <config.h>
 #include <fdb/sync/files.h>
 #include <futils/log.h>
@@ -21,6 +20,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+static struct timespec const F1_SEC = { 1, 0 };
+static struct timespec const F10_MSEC = { 0, 10000000 };
+
 enum
 {
     FSYNC_FILES_LIST_SIZE   = 1000,                     // Max number of files for sync
@@ -38,11 +40,11 @@ struct fsync
     sem_t                events_queue_sem;                                                                  // semaphore for events waiting
     fring_queue_t       *events_queue;                                                                      // events queue
     char                 events_queue_buf[FSYNC_QUEUEBUF_SIZE];                                             // buffer for file events queue
+    time_t               sync_time;
 
     volatile bool        is_sync_active;
     pthread_t            sync_thread;
     sem_t                sync_sem;
-    fcomposer_t          file_composer;
 
     fsdir_listener_t    *dir_listener;
 
@@ -87,13 +89,14 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
              ret = fdb_sync_files_iterator_next(it, &info, 0))
         {
             have_diff = true;
-            fsync_file_info_t *file_info = &files_list.files[files_list.files_num];
-            file_info->id     = info.id;
-            file_info->digest = info.digest;
-            file_info->size   = info.size;
+            fsync_file_info_t *file_info = &files_list.files[files_list.files_num++];
+            file_info->id       = info.id;
+            file_info->digest   = info.digest;
+            file_info->size     = info.size;
+            file_info->is_exist = (info.status & FFILE_IS_EXIST) != 0;
             memcpy(file_info->path, info.path, sizeof info.path);
 
-            if (++files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
+            if (files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
             {
                 if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
                     FS_ERR("Files list not published");
@@ -135,13 +138,14 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
                  psync->is_events_queue_processing_active && ret;
                  ret = fdb_sync_files_iterator_next(it, &info, 0))
             {
-                fsync_file_info_t *file_info = &files_list.files[files_list.files_num];
-                file_info->id     = info.id;
-                file_info->digest = info.digest;
-                file_info->size   = info.size;
+                fsync_file_info_t *file_info = &files_list.files[files_list.files_num++];
+                file_info->id       = info.id;
+                file_info->digest   = info.digest;
+                file_info->size     = info.size;
+                file_info->is_exist = (info.status & FFILE_IS_EXIST) != 0;
                 memcpy(file_info->path, info.path, sizeof info.path);
 
-                if (++files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
+                if (files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
                 {
                     if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
                         FS_ERR("Files list not published");
@@ -169,6 +173,12 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
         time_t const cur_time = time(0);
         bool is_need_sync = false;
 
+        fmsg_sync_files_list_t absent_files_list;
+        absent_files_list.uuid = psync->uuid;
+        absent_files_list.destination = msg->uuid;
+        absent_files_list.is_last = false;
+        absent_files_list.files_num = 0;
+
         for(uint32_t i = 0; i < msg->files_num; ++i)
         {
             ffile_info_t info = { 0 };
@@ -177,24 +187,39 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
             info.mod_time = cur_time;
             info.digest = msg->files[i].digest;
             info.size = msg->files[i].size;
-            info.is_exist = true;
+            info.status = FFILE_DIGEST_IS_CALCULATED;
+            if (msg->files[i].is_exist)
+                info.status |= FFILE_IS_EXIST;
             fdb_sync_file_add(&msg->uuid, &info);
 
-            ffile_info_t own_file_info;
-            if (!fdb_sync_file_get(&psync->uuid, info.path, &own_file_info))
+            info.id = FINVALID_ID;
+            info.status = 0;
+            is_need_sync |= fdb_sync_file_add_unique(&psync->uuid, &info);
+
+            if (info.id != FINVALID_ID)
             {
-                own_file_info = info;
-                own_file_info.id = FINVALID_ID;
-                own_file_info.is_exist = false;
-                fdb_sync_file_add(&psync->uuid, &own_file_info);
-                is_need_sync = true;
+                fsync_file_info_t *file_info = &absent_files_list.files[absent_files_list.files_num++];
+                file_info->id       = info.id;
+                file_info->digest   = info.digest;
+                file_info->size     = info.size;
+                file_info->is_exist = false;
+                memcpy(file_info->path, info.path, sizeof info.path);
             }
+
+/*
             else if (memcmp(&own_file_info.digest, &info.digest, sizeof info.digest) != 0)
             {
-                own_file_info.is_exist = false;
+                own_file_info.status = 0;
                 fdb_sync_file_add(&psync->uuid, &own_file_info);
                 is_need_sync = true;
             }
+*/
+        }
+
+        if (absent_files_list.files_num)
+        {
+            if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &absent_files_list, sizeof absent_files_list) != FSUCCESS)
+                FS_ERR("Absent files list not published");
         }
 
         if (is_need_sync)
@@ -264,19 +289,25 @@ static void fsync_file_part_handler(fsync_t *psync, uint32_t msg_type, fmsg_file
 
         if (fdb_sync_file_path(&msg->uuid, msg->id, path + len, sizeof path - len))
         {
-            int fd = open(path, O_CREAT | O_BINARY | O_WRONLY);
+            int fd = open(path, O_CREAT | O_BINARY | O_WRONLY, 0777);
             if (fd != -1)
             {
                 if (lseek(fd, msg->block_number * sizeof msg->data, SEEK_SET) >= 0)
                 {
                     if (write(fd, msg->data, msg->size) < 0)
                         FS_ERR("Unable to write data into the file: \'%s\'", path);
+                    else
+                    {
+                        ffile_info_t info;
+                        if(fdb_sync_file_get(&psync->uuid, path + len, &info))
+                            fdb_sync_part_received(&psync->uuid, info.id, msg->block_number);
+                    }
                 }
                 else FS_ERR("lseek failed");
 
                 close(fd);
             }
-            else FS_ERR("Unable to open the file: \'%s\'", path);
+            else FS_ERR("Unable to open the file: \'%s\'. Error: %d", path, errno);
         }
     }
 }
@@ -307,27 +338,64 @@ static void *fsync_thread(void *param)
 
     while(psync->is_sync_active)
     {
-        while (sem_wait(&psync->sync_sem) == -1 && errno == EINTR)
+        printf("Wait\n");
+
+        struct timespec tm = { time(0) + FSYNC_BLOCK_REQ_TIMEOUT, 0 };
+        while(psync->is_sync_active && sem_timedwait(&psync->sync_sem, &tm) == -1 && errno == EINTR)
             continue;       // Restart if interrupted by handler
 
+        printf("Get next file\n");
         ffile_info_t file_info;
-        while (psync->is_sync_active && !fdb_sync_file_get_if_not_exist(&psync->uuid, &file_info))
+        while (psync->is_sync_active && fdb_sync_file_get_if_not_exist(&psync->uuid, &file_info))
         {
-            // TODO: Find all active nodes.
-            // Now we get all nodes.
+            printf("Search nodes\n");
+            // I. Find all nodes where the file is exist
+            fuuid_t uuids[FMAX_CONNECTIONS_NUM];
+            uint32_t ids[FMAX_CONNECTIONS_NUM];
+            uint32_t n = fdb_get_uuids_where_file_is_exist(uuids, ids, file_info.path);
+            if (!n) break;
 
-            psync->file_composer.is_active = true;
-            psync->file_composer.msgbus = psync->msgbus;
-            psync->file_composer.nodes_num = fdb_get_uuids(&psync->file_composer.nodes);
-            psync->file_composer.file_id = file_info.id;
-            psync->file_composer.file_size = file_info.size;
-            strncpy(psync->file_composer.path, file_info.path, sizeof file_info.path);
+            // II. TODO: Find all active nodes
+            // III. Request parts from active nodes
 
-            // Find all nodes where the file is exist
-            // Request parts from active nodes
+            printf("Start sync\n");
+            if (!fdb_sync_start(file_info.id, FSYNC_BLOCK_REQ_TIMEOUT, FSYNC_MAX_REQ_PARTS_NUM, file_info.size))
+                break;
+
+            bool completed = false;
+
+            printf("File exist in %d nodes\n", n);
+
+            while(psync->is_sync_active && !completed)
+            {
+                uint32_t i = 0;
+                for(; i < n; ++i)
+                {
+                    uint32_t part = 0;
+                    if(fdb_sync_next_part(file_info.id, &part, &completed))
+                    {
+                        printf("Request %u\n", part);
+                        fmsg_file_part_request_t const req =
+                        {
+                            psync->uuid,
+                            uuids[i],
+                            ids[i],
+                            part
+                        };
+
+                        if (fmsgbus_publish(psync->msgbus, FFILE_PART_REQUEST, &req, sizeof req) != FSUCCESS)
+                        {
+                            FS_ERR("File part not requested");
+                            break;
+                        }
+                    }
+                    else break;
+                }
+
+                if (i < n)
+                    nanosleep(&F10_MSEC, NULL);
+            }
         }
-
-        psync->file_composer.is_active = false;
     }
 
     return false;
@@ -342,44 +410,43 @@ static void *fsync_events_queue_processing_thread(void *param)
 
     while(psync->is_events_queue_processing_active)
     {
-        while (sem_wait(&psync->events_queue_sem) == -1 && errno == EINTR)
+        struct timespec tm = { time(0) + FSYNC_TIMEOUT, 0 };
+        while(psync->is_events_queue_processing_active && sem_timedwait(&psync->events_queue_sem, &tm) == -1 && errno == EINTR)
             continue;       // Restart if interrupted by handler
 
         if (!psync->is_events_queue_processing_active)
             break;
 
-        time_t const cur_time = time(0);
         fsdir_event_t *event = 0;
         uint32_t event_size = 0;
-
-        uint32_t new_files_num = 0;
-        ffile_info_t new_files[FSYNC_MAX_QUEUE_ITEMS];
 
         // Copy data from queue into the list
         if (fring_queue_front(psync->events_queue, (void **)&event, &event_size) == FSUCCESS)
         {
+            time_t const cur_time = time(0);
+
             switch(event->action)
             {
-                case FSDIR_ACTION_ADDED:
+                case FSDIR_ACTION_ADDED:    // TODO
+/*
                 {
                     ffile_info_t info = { 0 };
                     info.id = FINVALID_ID;
                     info.mod_time = cur_time;
-                    info.is_exist = true;
+                    info.status = FFILE_IS_EXIST;
 
                     if (fsfile_md5sum(event->path, &info.digest))
                     {
                         strncpy(info.path, event->path + len + 1, sizeof info.path - len - 1);
                         fsfile_size(event->path, &info.size);
-                        if (fdb_sync_file_add_unique(&psync->uuid, &info))
-                            memcpy(&new_files[new_files_num++], &info, sizeof info);
+                        fdb_sync_file_add_unique(&psync->uuid, &info);
                     }
 
                     break;
                 }
-
-                case FSDIR_ACTION_REMOVED:  // TODO: remove file from other nodes
+*/
                 case FSDIR_ACTION_MODIFIED: // TODO: use rsync for differences synchronization
+                case FSDIR_ACTION_REMOVED:  // TODO: remove file from other nodes
                 case FSDIR_ACTION_RENAMED:  // TODO: rename for other nodes
                 case FSDIR_ACTION_REOPENED: // TODO: rescan whole directory
                 default:
@@ -390,24 +457,23 @@ static void *fsync_events_queue_processing_thread(void *param)
                 FS_WARN("Unable to pop the file system event from the queue");
         }
 
-        // Notify other nodes
+        // TODO: Notify other nodes
 /*
-        fuuid_t uuids[FMAX_CONNECTIONS_NUM];
-        uint32_t nodes_num = fdb_get_uuids(&uuids);
-
-        for(uint32_t i = 0; i < new_files_num; ++i)
+        time_t const cur_time = time(0);
+        if (cur_time - psync->sync_time >= FSYNC_TIMEOUT)
         {
-            ffile_info_t *info = &new_files[i];
-            info->id = FINVALID_ID;
-            info->is_exist = false;
+            fuuid_t uuids[FMAX_CONNECTIONS_NUM];
+            uint32_t nodes_num = fdb_get_uuids(uuids);
 
-            for(uint32_t j = 0; j < nodes_num; ++j)
+            for(uint32_t i = 0; i < nodes_num; ++i)
             {
-                if (fdb_sync_file_add_unique(&uuids[j], info))
+                if (memcmp(&psync->uuid, &uuids[i], sizeof uuids[i]) != 0)
                 {
-                    // TODO
+                    // TODO: fsync_notify_files_diff(psync, &uuids[i]);
                 }
             }
+
+            psync->sync_time = cur_time;
         }
 */
     }   // while(psync->is_active)
@@ -430,7 +496,7 @@ static void fsync_scan_dir(fsync_t *psync)
             ffile_info_t info = { 0 };
             info.id = FINVALID_ID;
             info.mod_time = cur_time;
-            info.is_exist = true;
+            info.status = FFILE_IS_EXIST;
 
             char full_path[FMAX_PATH];
             size_t full_path_len = fsdir_iterator_full_path(it, &entry, full_path, sizeof full_path);
@@ -438,6 +504,7 @@ static void fsync_scan_dir(fsync_t *psync)
             {
                 if (fsfile_md5sum(full_path, &info.digest))
                 {
+                    info.status |= FFILE_DIGEST_IS_CALCULATED;
                     fsdir_iterator_path(it, &entry, info.path, sizeof info.path);
                     fsfile_size(full_path, &info.size);
 
@@ -449,6 +516,8 @@ static void fsync_scan_dir(fsync_t *psync)
         }
     }
     fsdir_iterator_free(it);
+
+    psync->sync_time = time(0);
 }
 
 fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
@@ -531,8 +600,6 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
         return 0;
     }
 
-    static struct timespec const one_sec = { 1, 0 };
-
     int rc = pthread_create(&psync->sync_thread, 0, fsync_thread, (void*)psync);
     if (rc)
     {
@@ -542,7 +609,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
     }
 
     while(!psync->is_sync_active)
-        nanosleep(&one_sec, NULL);
+        nanosleep(&F1_SEC, NULL);
 
     rc = pthread_create(&psync->events_queue_processing_thread, 0, fsync_events_queue_processing_thread, (void*)psync);
     if (rc)
@@ -555,7 +622,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
     fsync_scan_dir(psync);
 
     while(!psync->is_events_queue_processing_active)
-        nanosleep(&one_sec, NULL);
+        nanosleep(&F1_SEC, NULL);
 
     fmsg_node_status_t const status = { *uuid, FSTATUS_READY4SYNC };
     if (fmsgbus_publish(psync->msgbus, FNODE_STATUS, &status, sizeof status) != FSUCCESS)

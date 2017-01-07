@@ -54,6 +54,7 @@ typedef struct
     char     path[FPROTO_MAX_PATH];
     fmd5_t   digest;
     uint64_t size;
+    bool     is_exist;
 } fproto_sync_file_info_t;
 
 typedef struct

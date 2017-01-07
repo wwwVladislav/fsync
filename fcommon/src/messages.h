@@ -29,6 +29,7 @@ typedef struct
     char     path[FMAX_PATH];
     fmd5_t   digest;
     uint64_t size;
+    bool     is_exist;
 } fsync_file_info_t;
 
 typedef struct

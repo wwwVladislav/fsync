@@ -21,6 +21,7 @@ typedef enum
 typedef struct fproto_field_desc
 {
     fproto_field_t            type;
+    size_t                    size;
     size_t                    offset;
     int                       number;
     struct fproto_field_desc const *struct_desc;
@@ -31,58 +32,59 @@ typedef struct fproto_field_desc
 
 FPROTO_DESC_TABLE(FPROTO_HELLO)
 {
-    { FPROTO_FIELD_UUID,   offsetof(fproto_hello_t, uuid),                      1 },
-    { FPROTO_FIELD_UINT32, offsetof(fproto_hello_t, version),                   1 },
-    { FPROTO_FIELD_NULL,   0,                                                   0 }
+    { FPROTO_FIELD_UUID,   sizeof(fuuid_t),  offsetof(fproto_hello_t, uuid),    1 },
+    { FPROTO_FIELD_UINT32, sizeof(uint32_t), offsetof(fproto_hello_t, version), 1 },
+    { FPROTO_FIELD_NULL,   0,                0,                                 0 }
 };
 
 FPROTO_DESC_TABLE(FPROTO_NODE_STATUS)
 {
-    { FPROTO_FIELD_UUID,   offsetof(fproto_node_status_t, uuid),                1 },
-    { FPROTO_FIELD_UINT32, offsetof(fproto_node_status_t, status),              1 },
-    { FPROTO_FIELD_NULL,   0,                                                   0 }
+    { FPROTO_FIELD_UUID,   sizeof(fuuid_t),  offsetof(fproto_node_status_t, uuid),   1 },
+    { FPROTO_FIELD_UINT32, sizeof(uint32_t), offsetof(fproto_node_status_t, status), 1 },
+    { FPROTO_FIELD_NULL,   0,                0,                                      0 }
 };
 
 FPROTO_DESC_TABLE(FPROTO_SYNC_FILE_INFO)
 {
-    { FPROTO_FIELD_UINT32, offsetof(fproto_sync_file_info_t, id),               1 },
-    { FPROTO_FIELD_STRING, offsetof(fproto_sync_file_info_t, path),             FPROTO_MAX_PATH },
-    { FPROTO_FIELD_UINT8,  offsetof(fproto_sync_file_info_t, digest),           sizeof(fmd5_t) },
-    { FPROTO_FIELD_UINT64, offsetof(fproto_sync_file_info_t, size),             1 },
-    { FPROTO_FIELD_NULL,   0,                                                   0 }
+    { FPROTO_FIELD_UINT32, sizeof(uint32_t), offsetof(fproto_sync_file_info_t, id),       1 },
+    { FPROTO_FIELD_STRING, sizeof(char),     offsetof(fproto_sync_file_info_t, path),     FPROTO_MAX_PATH },
+    { FPROTO_FIELD_UINT8,  sizeof(uint8_t),  offsetof(fproto_sync_file_info_t, digest),   sizeof(fmd5_t) },
+    { FPROTO_FIELD_UINT64, sizeof(uint64_t), offsetof(fproto_sync_file_info_t, size),     1 },
+    { FPROTO_FIELD_BOOL,   sizeof(bool),     offsetof(fproto_sync_file_info_t, is_exist), 1 },
+    { FPROTO_FIELD_NULL,   0,                0,                                           0 }
 };
 
 FPROTO_DESC_TABLE(FPROTO_SYNC_FILES_LIST)
 {
-    { FPROTO_FIELD_UUID,   offsetof(fproto_sync_files_list_t, uuid),            1 },
-    { FPROTO_FIELD_BOOL,   offsetof(fproto_sync_files_list_t, is_last),         1 },
-    { FPROTO_FIELD_UINT8,  offsetof(fproto_sync_files_list_t, files_num),       1 },
-    { FPROTO_FIELD_STRUCT, offsetof(fproto_sync_files_list_t, files),           -2, FPROTO_DESC_TABLE_NAME(FPROTO_SYNC_FILE_INFO) },
-    { FPROTO_FIELD_NULL,   0,                                                   0 }
+    { FPROTO_FIELD_UUID,   sizeof(fuuid_t),                 offsetof(fproto_sync_files_list_t, uuid),      1 },
+    { FPROTO_FIELD_BOOL,   sizeof(bool),                    offsetof(fproto_sync_files_list_t, is_last),   1 },
+    { FPROTO_FIELD_UINT8,  sizeof(uint8_t),                 offsetof(fproto_sync_files_list_t, files_num), 1 },
+    { FPROTO_FIELD_STRUCT, sizeof(fproto_sync_file_info_t), offsetof(fproto_sync_files_list_t, files),     -2, FPROTO_DESC_TABLE_NAME(FPROTO_SYNC_FILE_INFO) },
+    { FPROTO_FIELD_NULL,   0,                               0,                                             0 }
 };
 
 FPROTO_DESC_TABLE(FPROTO_FILE_PATH)
 {
-    { FPROTO_FIELD_STRING, 0,                                                   FPROTO_MAX_PATH },
-    { FPROTO_FIELD_NULL,   0,                                                   0 }
+    { FPROTO_FIELD_STRING, sizeof(char), 0, FPROTO_MAX_PATH },
+    { FPROTO_FIELD_NULL,   0,            0, 0 }
 };
 
 FPROTO_DESC_TABLE(FPROTO_FILE_PART_REQUEST)
 {
-    { FPROTO_FIELD_UUID,   offsetof(fproto_file_part_request_t, uuid),          1 },
-    { FPROTO_FIELD_UINT32, offsetof(fproto_file_part_request_t, id),            1 },
-    { FPROTO_FIELD_UINT32, offsetof(fproto_file_part_request_t, block_number),  1 },
-    { FPROTO_FIELD_NULL,   0,                                                   0 }
+    { FPROTO_FIELD_UUID,   sizeof(fuuid_t),  offsetof(fproto_file_part_request_t, uuid),         1 },
+    { FPROTO_FIELD_UINT32, sizeof(uint32_t), offsetof(fproto_file_part_request_t, id),           1 },
+    { FPROTO_FIELD_UINT32, sizeof(uint32_t), offsetof(fproto_file_part_request_t, block_number), 1 },
+    { FPROTO_FIELD_NULL,   0,                0,                                                  0 }
 };
 
 FPROTO_DESC_TABLE(FPROTO_FILE_PART)
 {
-    { FPROTO_FIELD_UUID,   offsetof(fproto_file_part_t, uuid),                  1 },
-    { FPROTO_FIELD_UINT32, offsetof(fproto_file_part_t, id),                    1 },
-    { FPROTO_FIELD_UINT32, offsetof(fproto_file_part_t, block_number),          1 },
-    { FPROTO_FIELD_UINT16, offsetof(fproto_file_part_t, size),                  1 },
-    { FPROTO_FIELD_UINT8 , offsetof(fproto_file_part_t, data),                  -3 },
-    { FPROTO_FIELD_NULL,   0,                                                   0 }
+    { FPROTO_FIELD_UUID,   sizeof(fuuid_t),  offsetof(fproto_file_part_t, uuid),         1 },
+    { FPROTO_FIELD_UINT32, sizeof(uint32_t), offsetof(fproto_file_part_t, id),           1 },
+    { FPROTO_FIELD_UINT32, sizeof(uint32_t), offsetof(fproto_file_part_t, block_number), 1 },
+    { FPROTO_FIELD_UINT16, sizeof(uint16_t), offsetof(fproto_file_part_t, size),         1 },
+    { FPROTO_FIELD_UINT8,  sizeof(uint8_t),  offsetof(fproto_file_part_t, data),         -3 },
+    { FPROTO_FIELD_NULL,   0,                0,                                          0 }
 };
 
 static fproto_field_desc_t const* fproto_messages[] =
@@ -97,7 +99,7 @@ static fproto_field_desc_t const* fproto_messages[] =
 static uint8_t const *fproto_marshal_struct(fnet_client_t *, fproto_field_desc_t const*, uint8_t const *);
 static uint8_t *fproto_unmarshal_struct(fnet_client_t *, fproto_field_desc_t const*, uint8_t *);
 
-static uint8_t const *fproto_marshal(fnet_client_t *client, fproto_field_t type, uint32_t number, fproto_field_desc_t const* desc, void const *ptr)
+static uint8_t const *fproto_marshal(fnet_client_t *client, fproto_field_t type, size_t size, uint32_t number, fproto_field_desc_t const* desc, void const *ptr)
 {
     switch(type)
     {
@@ -183,6 +185,7 @@ static uint8_t const *fproto_marshal(fnet_client_t *client, fproto_field_t type,
                 next = fproto_marshal_struct(client, desc, next);
                 if (!next)
                     break;
+                next = (uint8_t const *)ptr + size * (i + 1);
             }
             return next;
         }
@@ -218,7 +221,7 @@ static uint8_t const *fproto_marshal_struct(fnet_client_t *client, fproto_field_
                 break;
             }
         }
-        next = fproto_marshal(client, field->type, number, field->struct_desc, ptr + field->offset);
+        next = fproto_marshal(client, field->type, field->size, number, field->struct_desc, ptr + field->offset);
         if (!next)
             return 0;
     }
@@ -226,7 +229,7 @@ static uint8_t const *fproto_marshal_struct(fnet_client_t *client, fproto_field_
     return next;
 }
 
-static uint8_t *fproto_unmarshal(fnet_client_t *client, fproto_field_t type, uint32_t number, fproto_field_desc_t const* desc, void *ptr)
+static uint8_t *fproto_unmarshal(fnet_client_t *client, fproto_field_t type, size_t size, uint32_t number, fproto_field_desc_t const* desc, void *ptr)
 {
     switch(type)
     {
@@ -314,6 +317,7 @@ static uint8_t *fproto_unmarshal(fnet_client_t *client, fproto_field_t type, uin
                 next = fproto_unmarshal_struct(client, desc, next);
                 if (!next)
                     break;
+                next = (uint8_t *)ptr + size * (i + 1);
             }
             return next;
         }
@@ -349,7 +353,7 @@ static uint8_t *fproto_unmarshal_struct(fnet_client_t *client, fproto_field_desc
                 break;
             }
         }
-        next = fproto_unmarshal(client, field->type, number, field->struct_desc, ptr + field->offset);
+        next = fproto_unmarshal(client, field->type, field->size, number, field->struct_desc, ptr + field->offset);
         if (!next)
             return 0;
     }

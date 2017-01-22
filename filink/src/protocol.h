@@ -65,6 +65,7 @@ typedef struct
     fproto_sync_file_info_t files[FPROTO_SYNC_FILES_LIST_SIZE];
 } fproto_sync_files_list_t;
 
+// FPROTO_FILE_PART_REQUEST
 typedef struct
 {
     fuuid_t             uuid;
@@ -72,6 +73,7 @@ typedef struct
     uint32_t            block_number;
 } fproto_file_part_request_t;
 
+// FPROTO_FILE_PART
 typedef struct
 {
     fuuid_t             uuid;

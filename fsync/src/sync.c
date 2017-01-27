@@ -49,8 +49,7 @@ struct fsync
     fsdir_listener_t    *dir_listener;
 
     fmsgbus_t           *msgbus;
-
-    pthread_mutex_t      id_mutex;
+    fdb_t               *db;
 };
 
 #define fsync_push_lock(mutex)                      \
@@ -520,23 +519,11 @@ static void fsync_scan_dir(fsync_t *psync)
     psync->sync_time = time(0);
 }
 
-fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
+fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t const *uuid)
 {
-    if (!pmsgbus)
+    if (!pmsgbus || !db || dir || !*dir || !uuid)
     {
-        FS_ERR("Invalid messages bus");
-        return 0;
-    }
-
-    if (!dir || !*dir)
-    {
-        FS_ERR("Invalid directory path");
-        return 0;
-    }
-
-    if (!uuid)
-    {
-        FS_ERR("Invalid UUID");
+        FS_ERR("Invalid arguments");
         return 0;
     }
 
@@ -550,9 +537,6 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
 
     psync->uuid = *uuid;
 
-    static pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
-    psync->id_mutex = mutex_initializer;
-
     char *dst = psync->dir;
     for(; *dir && dst - psync->dir + 1 < sizeof psync->dir; ++dst, ++dir)
         *dst = *dir == '\\' ? '/' : *dir;
@@ -560,10 +544,12 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, char const *dir, fuuid_t const *uuid)
 
     fsync_msgbus_retain(psync, pmsgbus);
 
+    psync->db = fdb_retain(db);
+
     if (fring_queue_create(psync->events_queue_buf, sizeof psync->events_queue_buf, &psync->events_queue) != FSUCCESS)
     {
         FS_ERR("The file system events queue isn't created");
-        free(psync);
+        fsync_free(psync);
         return 0;
     }
 
@@ -654,6 +640,7 @@ void fsync_free(fsync_t *psync)
         sem_destroy(&psync->events_queue_sem);
         sem_destroy(&psync->sync_sem);
         fsync_msgbus_release(psync);
+        fdb_release(psync->db);
         free(psync);
     }
 }

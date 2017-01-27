@@ -95,7 +95,14 @@ macro(use_c99)
   endif ()
 endmacro(use_c99)
 
-add_subdirectory(../libs/sqlite sqlite)
+add_custom_command(
+    OUTPUT liblmdb.a
+    COMMAND make
+    WORKING_DIRECTORY ../libs/lmdb/libraries/liblmdb
+)
+
+add_custom_target(lmdb DEPENDS liblmdb.a)
+
 add_subdirectory(../futils      futils)
 add_subdirectory(../fdb         fdb)
 add_subdirectory(../fsync       fsync)

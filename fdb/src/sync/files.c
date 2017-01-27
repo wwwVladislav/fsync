@@ -7,8 +7,6 @@
 #include <stdlib.h>
 #include <pthread.h>
 
-// TODO: Use SQLite DB
-
 enum
 {
     FDB_FILES_LIST_SIZE     = 10000,    // Max number of files for sync for all nodes

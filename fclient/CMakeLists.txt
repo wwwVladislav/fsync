@@ -13,6 +13,7 @@ set(FCLIENT_SOURCES
 find_package(LIBRSYNC REQUIRED)
 
 include_directories(
+    ../fdb/include
     ../fsync/include
     ../futils/include
     ../filink/include

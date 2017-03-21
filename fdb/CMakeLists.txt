@@ -28,5 +28,5 @@ include_directories(
 message(STATUS "LIBLMDB_INCLUDES = ${LIBLMDB_INCLUDES}")
 
 add_library(fdb SHARED ${FDB_HEADERS} ${FDB_SOURCES})
-add_dependencies(fdb futils lmdb)
+add_dependencies(fdb futils)
 target_link_libraries(fdb futils Threads::Threads ${LIBLMDB_LIBRARIES})

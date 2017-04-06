@@ -1,6 +1,6 @@
 #ifndef FSUTILS_H_FSYNC
 #define FSUTILS_H_FSYNC
-#include <config.h>
+#include <fcommon/limits.h>
 #include <futils/md5.h>
 #include <stdbool.h>
 #include <stddef.h>

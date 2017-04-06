@@ -3,14 +3,16 @@ project(fdb)
 
 set(FDB_HEADERS
     src/sync/files.h
+    src/sync/nodes.h
+    src/sync/config.h
     src/db.h
-    src/config.h
 )
 
 set(FDB_SOURCES
     src/sync/files.c
+    src/sync/nodes.c
+    src/sync/config.c
     src/db.c
-    src/config.c
 )
 
 use_c99()

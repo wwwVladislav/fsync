@@ -1,4 +1,4 @@
-# - Check for the presence of liblmdb
+# - Check for the presence of lmdb
 #
 # The following variables are set when LIBLMDB is found:
 #  LIBLMDB_FOUND           - Set to true, if all components of LIBLMDB have been found.
@@ -12,10 +12,9 @@ if (NOT LIBLMDB_FOUND)
         set(_x86 " (x86)")
         set (LIBLMDB_ROOT_DIR
             ${CMAKE_INSTALL_PREFIX}
-            $ENV{ProgramFiles}/liblmdb
-            $ENV{ProgramFiles}${_x86}/liblmdb
-            ../libs/liblmdb
-            ../libs/lmdb/libraries/liblmdb
+            $ENV{ProgramFiles}/lmdb
+            $ENV{ProgramFiles}${_x86}/lmdb
+            ../libs/lmdb
         )
     endif (NOT LIBLMDB_ROOT_DIR)
 

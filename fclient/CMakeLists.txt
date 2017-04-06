@@ -17,9 +17,10 @@ include_directories(
     ../fsync/include
     ../futils/include
     ../filink/include
+    ../fcommon/include
     ${LIBRSYNC_INCLUDES}
 )
 
 add_executable(fclient ${FCLIENT_HEADERS} ${FCLIENT_SOURCES})
-add_dependencies(fclient fsync filink)
-target_link_libraries(fclient fsync filink ${LIBRSYNC_LIBRARIES})
+add_dependencies(fclient fsync filink fdb)
+target_link_libraries(fclient fsync filink fdb ${LIBRSYNC_LIBRARIES})

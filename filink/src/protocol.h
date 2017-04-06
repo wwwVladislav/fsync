@@ -3,7 +3,7 @@
 #include <futils/uuid.h>
 #include <futils/md5.h>
 #include <fnet/transport.h>
-#include <config.h>
+#include <fcommon/limits.h>
 #include <stdbool.h>
 
 // Message types

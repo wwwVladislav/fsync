@@ -3,7 +3,7 @@
 #include <futils/static_allocator.h>
 #include <futils/log.h>
 #include <string.h>
-#include <config.h>
+#include <fcommon/limits.h>
 #include <stdlib.h>
 #include <pthread.h>
 
@@ -90,7 +90,7 @@ static void fdb_init()
     sync.mutex = mutex_initializer;
 }
 
-bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t *info)
+bool fdb_file_add(fuuid_t const *uuid, ffile_info_t *info)
 {
     fdb_init();
 
@@ -135,7 +135,7 @@ bool fdb_sync_file_add(fuuid_t const *uuid, ffile_info_t *info)
     return ret;
 }
 
-bool fdb_sync_file_add_unique(fuuid_t const *uuid, ffile_info_t *info)
+bool fdb_file_add_unique(fuuid_t const *uuid, ffile_info_t *info)
 {
     fdb_init();
 
@@ -170,7 +170,7 @@ bool fdb_sync_file_add_unique(fuuid_t const *uuid, ffile_info_t *info)
     return ret;
 }
 
-bool fdb_sync_file_del(fuuid_t const *uuid, char const *path)
+bool fdb_file_del(fuuid_t const *uuid, char const *path)
 {
     fdb_init();
 
@@ -199,7 +199,7 @@ bool fdb_sync_file_del(fuuid_t const *uuid, char const *path)
     return ret;
 }
 
-bool fdb_sync_file_get(fuuid_t const *uuid, char const *path, ffile_info_t *info)
+bool fdb_file_get(fuuid_t const *uuid, char const *path, ffile_info_t *info)
 {
     fdb_init();
 
@@ -224,7 +224,7 @@ bool fdb_sync_file_get(fuuid_t const *uuid, char const *path, ffile_info_t *info
     return ret;
 }
 
-bool fdb_sync_file_get_if_not_exist(fuuid_t const *uuid, ffile_info_t *info)
+bool fdb_file_get_if_not_exist(fuuid_t const *uuid, ffile_info_t *info)
 {
     fdb_init();
 
@@ -248,13 +248,13 @@ bool fdb_sync_file_get_if_not_exist(fuuid_t const *uuid, ffile_info_t *info)
     return ret;
 }
 
-bool fdb_sync_file_del_all(fuuid_t const *uuid)
+bool fdb_file_del_all(fuuid_t const *uuid)
 {
     // TODO
     return true;
 }
 
-bool fdb_sync_file_update(fuuid_t const *uuid, ffile_info_t const *info)
+bool fdb_file_update(fuuid_t const *uuid, ffile_info_t const *info)
 {
     fdb_init();
 
@@ -281,7 +281,7 @@ bool fdb_sync_file_update(fuuid_t const *uuid, ffile_info_t const *info)
     return inf ? true : false;
 }
 
-bool fdb_sync_file_path(fuuid_t const *uuid, uint32_t id, char *path, size_t size)
+bool fdb_file_path(fuuid_t const *uuid, uint32_t id, char *path, size_t size)
 {
     fdb_init();
 
@@ -311,7 +311,7 @@ typedef enum
     FDB_ITERATE_DIFF
 } fdb_iterator_t;
 
-struct fdb_syncfiles_iterator
+struct fdb_files_iterator
 {
     fdb_iterator_t type;
     fuuid_t        uuid0;
@@ -319,9 +319,9 @@ struct fdb_syncfiles_iterator
     size_t         idx;
 };
 
-fdb_sync_files_iterator_t *fdb_sync_files_iterator(fuuid_t const *uuid)
+fdb_files_iterator_t *fdb_files_iterator(fuuid_t const *uuid)
 {
-    fdb_sync_files_iterator_t *piterator = malloc(sizeof(fdb_sync_files_iterator_t));
+    fdb_files_iterator_t *piterator = malloc(sizeof(fdb_files_iterator_t));
     if (!piterator)
     {
         FS_ERR("Unable to allocate memory sync files iterator");
@@ -342,11 +342,11 @@ fdb_sync_files_iterator_t *fdb_sync_files_iterator(fuuid_t const *uuid)
     return piterator;
 }
 
-fdb_sync_files_iterator_t *fdb_sync_files_iterator_diff(fuuid_t const *uuid0, fuuid_t const *uuid1)
+fdb_files_iterator_t *fdb_files_iterator_diff(fuuid_t const *uuid0, fuuid_t const *uuid1)
 {
     if (!uuid0 || !uuid1) return 0;
 
-    fdb_sync_files_iterator_t *piterator = malloc(sizeof(fdb_sync_files_iterator_t));
+    fdb_files_iterator_t *piterator = malloc(sizeof(fdb_files_iterator_t));
     if (!piterator)
     {
         FS_ERR("Unable to allocate memory sync files iterator");
@@ -362,13 +362,13 @@ fdb_sync_files_iterator_t *fdb_sync_files_iterator_diff(fuuid_t const *uuid0, fu
     return piterator;
 }
 
-void fdb_sync_files_iterator_free(fdb_sync_files_iterator_t *piterator)
+void fdb_files_iterator_free(fdb_files_iterator_t *piterator)
 {
     if (piterator)
         free(piterator);
 }
 
-bool fdb_sync_files_iterator_first(fdb_sync_files_iterator_t *piterator, ffile_info_t *info, fdb_diff_kind_t *diff_kind)
+bool fdb_files_iterator_first(fdb_files_iterator_t *piterator, ffile_info_t *info, fdb_diff_kind_t *diff_kind)
 {
     if (!piterator || !info)
         return false;
@@ -445,7 +445,7 @@ bool fdb_sync_files_iterator_first(fdb_sync_files_iterator_t *piterator, ffile_i
     return ret;
 }
 
-bool fdb_sync_files_iterator_next(fdb_sync_files_iterator_t *piterator, ffile_info_t *info, fdb_diff_kind_t *diff_kind)
+bool fdb_files_iterator_next(fdb_files_iterator_t *piterator, ffile_info_t *info, fdb_diff_kind_t *diff_kind)
 {
     if (!piterator || !info)
         return false;
@@ -523,7 +523,7 @@ bool fdb_sync_files_iterator_next(fdb_sync_files_iterator_t *piterator, ffile_in
     return ret;
 }
 
-bool fdb_sync_files_iterator_uuid(fdb_sync_files_iterator_t *piterator, ffile_info_t *uuid)
+bool fdb_files_iterator_uuid(fdb_files_iterator_t *piterator, ffile_info_t *uuid)
 {
     if (!piterator || !uuid)
         return false;

@@ -1,5 +1,5 @@
 #include "../../socket.h"
-#include <config.h>
+#include <fcommon/limits.h>
 #include <futils/log.h>
 #include <Winsock2.h>
 

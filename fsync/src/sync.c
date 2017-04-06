@@ -1,11 +1,11 @@
 #include "sync.h"
 #include "fsutils.h"
-#include <config.h>
+#include <fcommon/limits.h>
+#include <fcommon/messages.h>
 #include <fdb/sync/files.h>
 #include <futils/log.h>
 #include <futils/queue.h>
 #include <futils/static_allocator.h>
-#include <messages.h>
 #define RSYNC_NO_STDIO_INTERFACE
 #include <librsync.h>
 #include <stdlib.h>
@@ -71,7 +71,7 @@ static void fsdir_evt_handler(fsdir_event_t const *event, void *arg)
 
 static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
 {
-    fdb_sync_files_iterator_t *it = fdb_sync_files_iterator_diff(&psync->uuid, uuid);
+    fdb_files_iterator_t *it = fdb_files_iterator_diff(&psync->uuid, uuid);
     if (it)
     {
         fmsg_sync_files_list_t files_list;
@@ -83,9 +83,9 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
         ffile_info_t info;
         bool have_diff = false;
 
-        for (bool ret = fdb_sync_files_iterator_first(it, &info, 0);
+        for (bool ret = fdb_files_iterator_first(it, &info, 0);
              psync->is_events_queue_processing_active && ret;
-             ret = fdb_sync_files_iterator_next(it, &info, 0))
+             ret = fdb_files_iterator_next(it, &info, 0))
         {
             have_diff = true;
             fsync_file_info_t *file_info = &files_list.files[files_list.files_num++];
@@ -103,7 +103,7 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
             }
         }
 
-        fdb_sync_files_iterator_free(it);
+        fdb_files_iterator_free(it);
 
         if (have_diff)
         {
@@ -122,7 +122,7 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
     {
         FS_INFO("UUID %llx%llx is ready for sync", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
 
-        fdb_sync_files_iterator_t *it = fdb_sync_files_iterator(&psync->uuid);
+        fdb_files_iterator_t *it = fdb_files_iterator(&psync->uuid);
         if (it)
         {
             fmsg_sync_files_list_t files_list;
@@ -133,9 +133,9 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
 
             ffile_info_t info;
 
-            for (bool ret = fdb_sync_files_iterator_first(it, &info, 0);
+            for (bool ret = fdb_files_iterator_first(it, &info, 0);
                  psync->is_events_queue_processing_active && ret;
-                 ret = fdb_sync_files_iterator_next(it, &info, 0))
+                 ret = fdb_files_iterator_next(it, &info, 0))
             {
                 fsync_file_info_t *file_info = &files_list.files[files_list.files_num++];
                 file_info->id       = info.id;
@@ -152,7 +152,7 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
                 }
             }
 
-            fdb_sync_files_iterator_free(it);
+            fdb_files_iterator_free(it);
 
             files_list.is_last = true;
             if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
@@ -189,11 +189,11 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
             info.status = FFILE_DIGEST_IS_CALCULATED;
             if (msg->files[i].is_exist)
                 info.status |= FFILE_IS_EXIST;
-            fdb_sync_file_add(&msg->uuid, &info);
+            fdb_file_add(&msg->uuid, &info);
 
             info.id = FINVALID_ID;
             info.status = 0;
-            is_need_sync |= fdb_sync_file_add_unique(&psync->uuid, &info);
+            is_need_sync |= fdb_file_add_unique(&psync->uuid, &info);
 
             if (info.id != FINVALID_ID)
             {
@@ -242,7 +242,7 @@ static void fsync_file_part_request_handler(fsync_t *psync, uint32_t msg_type, f
         strncpy(path, psync->dir, sizeof path);
         path[len++] = '/';
 
-        if (fdb_sync_file_path(&psync->uuid, msg->id, path + len, sizeof path - len))
+        if (fdb_file_path(&psync->uuid, msg->id, path + len, sizeof path - len))
         {
             int fd = open(path, O_BINARY | O_RDONLY);
             if (fd != -1)
@@ -286,7 +286,7 @@ static void fsync_file_part_handler(fsync_t *psync, uint32_t msg_type, fmsg_file
         strncpy(path, psync->dir, sizeof path);
         path[len++] = '/';
 
-        if (fdb_sync_file_path(&msg->uuid, msg->id, path + len, sizeof path - len))
+        if (fdb_file_path(&msg->uuid, msg->id, path + len, sizeof path - len))
         {
             int fd = open(path, O_CREAT | O_BINARY | O_WRONLY, 0777);
             if (fd != -1)
@@ -298,7 +298,7 @@ static void fsync_file_part_handler(fsync_t *psync, uint32_t msg_type, fmsg_file
                     else
                     {
                         ffile_info_t info;
-                        if(fdb_sync_file_get(&psync->uuid, path + len, &info))
+                        if(fdb_file_get(&psync->uuid, path + len, &info))
                             fdb_sync_part_received(&psync->uuid, info.id, msg->block_number);
                     }
                 }
@@ -345,7 +345,7 @@ static void *fsync_thread(void *param)
 
         printf("Get next file\n");
         ffile_info_t file_info;
-        while (psync->is_sync_active && fdb_sync_file_get_if_not_exist(&psync->uuid, &file_info))
+        while (psync->is_sync_active && fdb_file_get_if_not_exist(&psync->uuid, &file_info))
         {
             printf("Search nodes\n");
             // I. Find all nodes where the file is exist
@@ -482,7 +482,7 @@ static void *fsync_events_queue_processing_thread(void *param)
 
 static void fsync_scan_dir(fsync_t *psync)
 {
-    fdb_sync_file_del_all(&psync->uuid);
+    fdb_file_del_all(&psync->uuid);
 
     fsiterator_t *it = fsdir_iterator(psync->dir);
 
@@ -507,7 +507,7 @@ static void fsync_scan_dir(fsync_t *psync)
                     fsdir_iterator_path(it, &entry, info.path, sizeof info.path);
                     fsfile_size(full_path, &info.size);
 
-                    fdb_sync_file_add(&psync->uuid, &info);
+                    fdb_file_add(&psync->uuid, &info);
                 }
             }
             else

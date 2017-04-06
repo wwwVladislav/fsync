@@ -1,5 +1,5 @@
-#ifndef CONFIG_H_FCOMMON
-#define CONFIG_H_FCOMMON
+#ifndef LIMITS_H_FCOMMON
+#define LIMITS_H_FCOMMON
 
 enum
 {
@@ -11,7 +11,8 @@ enum
     FMAX_ACCEPT_CONNECTIONS     = 10,       // Maximum number of accepted connections
     FSYNC_BLOCK_SIZE            = 4 * 1024, // synchronization blocks size
     FSYNC_BLOCK_REQ_TIMEOUT     = 24*60*60, // Timeout for file part request (sec)
-    FSYNC_MAX_REQ_PARTS_NUM     = 64        // Maximum number of requested parts
+    FSYNC_MAX_REQ_PARTS_NUM     = 64,       // Maximum number of requested parts
+    FMAX_ADDR                   = 1024      // Max address length
 };
 
 #endif

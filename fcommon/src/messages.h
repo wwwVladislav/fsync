@@ -1,6 +1,6 @@
 #ifndef MESSAGES_H_FCOMMON
 #define MESSAGES_H_FCOMMON
-#include "config.h"
+#include "limits.h"
 #include <futils/uuid.h>
 #include <futils/md5.h>
 

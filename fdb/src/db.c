@@ -6,6 +6,9 @@
 #include <stddef.h>
 #include <string.h>
 #include <lmdb.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include <io.h>
 
 struct fdb
 {
@@ -13,13 +16,29 @@ struct fdb
     MDB_env *env;
 };
 
-#define FDB_CALL(pdb, expr)                                                 \
-    if((rc = (expr)) != MDB_SUCCESS)                                        \
-    {                                                                       \
-        FS_ERR("The LMDB initialization failed: \'%s\'", mdb_strerror(rc)); \
-        fdb_release(pdb);                                                   \
-        return 0;                                                           \
+#define FDB_CALL(pdb, expr)                                                             \
+    if((rc = (expr)) != MDB_SUCCESS)                                                    \
+    {                                                                                   \
+        FS_ERR("The LMDB initialization failed: \'%s\' (%d)", mdb_strerror(rc), rc);    \
+        fdb_release(pdb);                                                               \
+        return 0;                                                                       \
     }
+
+static bool is_dir_exist(const char *path)
+{
+    struct stat info;
+    if (stat(path, &info) != 0)
+        return false;
+    return (info.st_mode & S_IFDIR) != 0;
+}
+
+static bool make_dir(const char *path)
+{
+    int ret = mkdir(path);
+    if (ret == 0)
+        return true;
+    return errno == EEXIST;
+}
 
 fdb_t* fdb_open(char const *path, uint32_t max_dbs, uint32_t readers, uint32_t size)
 {
@@ -30,6 +49,9 @@ fdb_t* fdb_open(char const *path, uint32_t max_dbs, uint32_t readers, uint32_t s
         FS_ERR("Invalid arguments");
         return 0;
     }
+
+    if (!is_dir_exist(path))
+        make_dir(path);
 
     fdb_t *pdb = malloc(sizeof(fdb_t));
     if (!pdb)
@@ -131,7 +153,7 @@ bool fdb_map_open(fdb_transaction_t *transaction, char const *name, uint32_t fla
         return false;
     }
 
-    pmap->transaction = transaction;
+    pmap->pdb = fdb_retain(transaction->pdb);
     pmap->dbmap = (unsigned int)dbi;
 
     return true;
@@ -142,7 +164,8 @@ void fdb_map_close(fdb_map_t *pmap)
     if (pmap)
     {
         MDB_dbi dbi = (MDB_dbi)pmap->dbmap;
-        mdb_dbi_close(pmap->transaction->pdb->env, dbi);
+        mdb_dbi_close(pmap->pdb->env, dbi);
+        fdb_release(pmap->pdb);
     }
 }
 
@@ -150,12 +173,18 @@ FSTATIC_ASSERT(sizeof(fdb_data_t) == sizeof(MDB_val));
 FSTATIC_ASSERT(offsetof(fdb_data_t, size) == offsetof(MDB_val, mv_size));
 FSTATIC_ASSERT(offsetof(fdb_data_t, data) == offsetof(MDB_val, mv_data));
 
-bool fdb_map_put(fdb_map_t *pmap, fdb_data_t const *key, fdb_data_t const *value)
+bool fdb_map_put(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t const *key, fdb_data_t const *value)
 {
-    if (!pmap || !key || !value)
+    if (!pmap || !key || !value || !transaction)
         return false;
-    MDB_txn *txn = (MDB_txn*)pmap->transaction->ptransaction;
+    MDB_txn *txn = (MDB_txn*)transaction->ptransaction;
     MDB_dbi dbi = (MDB_dbi)pmap->dbmap;
+
+    if (!txn)
+    {
+        FS_ERR("Invalid operation. The data should be inserted in transaction.");
+        return false;
+    }
 
     int rc = mdb_put(txn, dbi, (MDB_val*)key, (MDB_val*)value, 0);
     if(rc != MDB_SUCCESS)
@@ -167,12 +196,18 @@ bool fdb_map_put(fdb_map_t *pmap, fdb_data_t const *key, fdb_data_t const *value
     return true;
 }
 
-bool fdb_map_put_unique(fdb_map_t *pmap, fdb_data_t const *key, fdb_data_t const *value)
+bool fdb_map_put_unique(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t const *key, fdb_data_t const *value)
 {
-    if (!pmap || !key || !value)
+    if (!pmap || !key || !value || !transaction)
         return false;
-    MDB_txn *txn = (MDB_txn*)pmap->transaction->ptransaction;
+    MDB_txn *txn = (MDB_txn*)transaction->ptransaction;
     MDB_dbi dbi = (MDB_dbi)pmap->dbmap;
+
+    if (!txn)
+    {
+        FS_ERR("Invalid operation. The data should be inserted in transaction.");
+        return false;
+    }
 
     int rc = mdb_put(txn, dbi, (MDB_val*)key, (MDB_val*)value, MDB_NOOVERWRITE);
 
@@ -188,12 +223,18 @@ bool fdb_map_put_unique(fdb_map_t *pmap, fdb_data_t const *key, fdb_data_t const
     return true;
 }
 
-bool fdb_map_get(fdb_map_t *pmap, fdb_data_t const *key, fdb_data_t *value)
+bool fdb_map_get(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t const *key, fdb_data_t *value)
 {
-    if (!pmap || !key || !value)
+    if (!pmap || !key || !value || !transaction)
         return false;
-    MDB_txn *txn = (MDB_txn*)pmap->transaction->ptransaction;
+    MDB_txn *txn = (MDB_txn*)transaction->ptransaction;
     MDB_dbi dbi = (MDB_dbi)pmap->dbmap;
+
+    if (!txn)
+    {
+        FS_ERR("Invalid operation. The data should be retrieved in transaction.");
+        return false;
+    }
 
     int rc = mdb_get(txn, dbi, (MDB_val*)key, (MDB_val*)value);
 
@@ -207,4 +248,64 @@ bool fdb_map_get(fdb_map_t *pmap, fdb_data_t const *key, fdb_data_t *value)
     }
 
     return true;
+}
+
+bool fdb_cursor_open(fdb_transaction_t *transaction, fdb_map_t *pmap, fdb_cursor_t *pcursor)
+{
+    if (!transaction || !pmap || !pcursor)
+        return false;
+
+    MDB_txn *txn = (MDB_txn*)transaction->ptransaction;
+    MDB_dbi dbi = (MDB_dbi)pmap->dbmap;
+    MDB_cursor *cursor;
+
+    int rc = mdb_cursor_open(txn, dbi, &cursor);
+
+    if(rc != MDB_SUCCESS)
+    {
+        FS_ERR("Unable to open new cursor: \'%s\'", mdb_strerror(rc));
+        return false;
+    }
+
+    pcursor->pdb = fdb_retain(transaction->pdb);
+    pcursor->pcursor = cursor;
+    return true;
+}
+
+void fdb_cursor_close(fdb_cursor_t *pcursor)
+{
+    if (pcursor)
+    {
+        MDB_cursor *cursor = pcursor->pcursor;
+        mdb_cursor_close(cursor);
+        fdb_release(pcursor->pdb);
+        memset(pcursor, 0, sizeof *pcursor);
+    }
+}
+
+bool fdb_cursor_get(fdb_cursor_t *pcursor, fdb_data_t *key, fdb_data_t *value, fdb_cursor_op_t op)
+{
+    if (!pcursor || !key || !value)
+        return false;
+
+    MDB_cursor_op const cursor_op = op == FDB_FIRST ? MDB_FIRST :
+                                    op == FDB_CURRENT ? MDB_GET_CURRENT :
+                                    op == FDB_LAST ? MDB_LAST :
+                                    op == FDB_NEXT ? MDB_NEXT :
+                                    op == FDB_PREV ? MDB_PREV :
+                                    MDB_FIRST;
+    MDB_cursor *cursor = (MDB_cursor *)pcursor->pcursor;
+
+    int rc = mdb_cursor_get(cursor, (MDB_val*)key, (MDB_val*)value, cursor_op);
+
+    switch(rc)
+    {
+        case MDB_SUCCESS:
+            return true;
+        case MDB_NOTFOUND:
+            return false;
+    }
+
+    FS_ERR("Unable to get data by cursor: \'%s\'", mdb_strerror(rc));
+    return false;
 }

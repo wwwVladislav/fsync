@@ -6,33 +6,30 @@
 #include <futils/msgbus.h>
 #include <filink/interface.h>
 #include <fsync/sync.h>
+#include <fdb/sync/config.h>
 
 static char const *FDB_DATA_SOURCE = "data";
 
 enum
 {
     FDB_MAX_READERS = 1,
-    FDB_MAP_SIZE    = 16 * 1024 * 1024,
-    FDB_MAX_DBS     = 4
+    FDB_MAP_SIZE    = 64 * 1024 * 1024,
+    FDB_MAX_DBS     = 8
 };
 
 struct fcore
 {
-    fuuid_t    uuid;
     fmsgbus_t *msgbus;
     filink_t  *ilink;
     fsync_t   *sync;
     fdb_t     *db;
+    fconfig_t  config;
 };
+
+//fconfig_t  config;
 
 fcore_t *fcore_start(char const *addr)
 {
-    if (!addr)
-    {
-        FS_ERR("Invalid address");
-        return 0;
-    }
-
     fcore_t *pcore = malloc(sizeof(fcore_t));
     if (!pcore)
     {
@@ -49,12 +46,27 @@ fcore_t *fcore_start(char const *addr)
         return 0;
     }
 
-    if (!fuuid_gen(&pcore->uuid))
+    if (!fdb_load_config(pcore->db, &pcore->config))
     {
-        FS_ERR("UUID generation failed for node");
-        fcore_stop(pcore);
-        return 0;
+        if (!addr)
+        {
+            FS_ERR("Invalid address");
+            return 0;
+        }
+
+        if (!fuuid_gen(&pcore->config.uuid))
+        {
+            FS_ERR("UUID generation failed for node");
+            fcore_stop(pcore);
+            return 0;
+        }
     }
+
+    if (addr)
+        strncpy(pcore->config.address, addr, sizeof pcore->config.address);
+
+    if (!fdb_save_config(pcore->db, &pcore->config))
+        FS_ERR("Current configuration doesn't saved");
 
     if (fmsgbus_create(&pcore->msgbus) != FSUCCESS)
     {
@@ -63,14 +75,14 @@ fcore_t *fcore_start(char const *addr)
         return 0;
     }
 
-    pcore->ilink = filink_bind(pcore->msgbus, addr, &pcore->uuid);
+    pcore->ilink = filink_bind(pcore->msgbus, pcore->config.address, &pcore->config.uuid);
     if (!pcore->ilink)
     {
         fcore_stop(pcore);
         return 0;
     }
 
-    FS_INFO("Started node UUID: %llx%llx", pcore->uuid.data.u64[0], pcore->uuid.data.u64[1]);
+    FS_INFO("Started node UUID: %llx%llx", pcore->config.uuid.data.u64[0], pcore->config.uuid.data.u64[1]);
     return pcore;
 }
 
@@ -114,7 +126,7 @@ bool fcore_sync(fcore_t *pcore, char const *dir)
     if (pcore->sync)
         fsync_free(pcore->sync);
 
-    pcore->sync = fsync_create(pcore->msgbus, pcore->db, dir, &pcore->uuid);
+    pcore->sync = fsync_create(pcore->msgbus, pcore->db, dir, &pcore->config.uuid);
 
     return true;
 }

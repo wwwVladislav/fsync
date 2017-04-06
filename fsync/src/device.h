@@ -1,6 +1,6 @@
 #ifndef DEVICE_H_FSYNC
 #define DEVICE_H_FSYNC
-#include "config.h"
+#include <fcommon/limits.h>
 
 typedef enum fsdev_type
 {

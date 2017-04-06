@@ -36,13 +36,10 @@ static const char CMD_SYNC[4]    = "sync";
 
 int main(int argc, char **argv)
 {
-    if (argc < 2)
-    {
-        printf("Usage: client.exe IP:port");
-        return 0;
-    }
     printf("Starting...\n");
-    fcore_t *core = fcore_start(argv[1]);
+
+    fcore_t *core = fcore_start(argc > 1 ? argv[1] : 0);
+
     if (core)
     {
         char cmd[1024];
@@ -61,6 +58,8 @@ int main(int argc, char **argv)
 
         fcore_stop(core);
     }
+    else if (argc < 2)
+        printf("Usage: client.exe IP:port");
 
     return 0;
 }

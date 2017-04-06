@@ -1,5 +1,5 @@
 #include "ssl_transport.h"
-#include "config.h"
+#include <fcommon/limits.h>
 #include "socket.h"
 #include <futils/log.h>
 #include <openssl/ssl.h>

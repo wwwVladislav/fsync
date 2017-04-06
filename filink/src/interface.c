@@ -2,7 +2,7 @@
 #include "protocol.h"
 #include <fnet/transport.h>
 #include <futils/log.h>
-#include <messages.h>
+#include <fcommon/messages.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>

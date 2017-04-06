@@ -1,4 +1,4 @@
-# - Check for the presence of librsync
+# - Check for the presence of rsync
 #
 # The following variables are set when LIBRSYNC is found:
 #  LIBRSYNC_FOUND           - Set to true, if all components of LIBRSYNC have been found.
@@ -12,9 +12,9 @@ if (NOT LIBRSYNC_FOUND)
         set(_x86 " (x86)")
         set (LIBRSYNC_ROOT_DIR
             ${CMAKE_INSTALL_PREFIX}
-            $ENV{ProgramFiles}/librsync
-            $ENV{ProgramFiles}${_x86}/librsync
-            ../libs/librsync
+            $ENV{ProgramFiles}/rsync
+            $ENV{ProgramFiles}${_x86}/rsync
+            ../libs/rsync
         )
     endif (NOT LIBRSYNC_ROOT_DIR)
 

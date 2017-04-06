@@ -196,6 +196,13 @@ bool fdb_map_put(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t con
     return true;
 }
 
+bool fdb_map_put_value(fdb_map_t *pmap, fdb_transaction_t *transaction, char const *key, void const *value, size_t size)
+{
+    fdb_data_t const k = { strlen(key), (void*)key };
+    fdb_data_t const v = { size, (void*)value };
+    return fdb_map_put(pmap, transaction, &k, &v);
+}
+
 bool fdb_map_put_unique(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t const *key, fdb_data_t const *value)
 {
     if (!pmap || !key || !value || !transaction)
@@ -248,6 +255,18 @@ bool fdb_map_get(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t con
     }
 
     return true;
+}
+
+bool fdb_map_get_value(fdb_map_t *pmap, fdb_transaction_t *transaction, char const *key, void *value, size_t size)
+{
+    fdb_data_t const k = { strlen(key), (void*)key };
+    fdb_data_t v = { 0 };
+    if (fdb_map_get(pmap, transaction, &k, &v) && v.size <= size)
+    {
+        memcpy(value, v.data, v.size);
+        return true;
+    }
+    return false;
 }
 
 bool fdb_cursor_open(fdb_transaction_t *transaction, fdb_map_t *pmap, fdb_cursor_t *pcursor)

@@ -14,7 +14,7 @@ enum
 {
     FDB_MAX_READERS = 1,
     FDB_MAP_SIZE    = 64 * 1024 * 1024,
-    FDB_MAX_DBS     = 8
+    FDB_MAX_DBS     = 8     // config, nodes
 };
 
 struct fcore
@@ -25,8 +25,6 @@ struct fcore
     fdb_t     *db;
     fconfig_t  config;
 };
-
-//fconfig_t  config;
 
 fcore_t *fcore_start(char const *addr)
 {

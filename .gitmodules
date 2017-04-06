@@ -1,3 +1,6 @@
 [submodule "libs/lmdb"]
 	path = libs/lmdb
 	url = https://github.com/LMDB/lmdb.git
+[submodule "libs/binn"]
+	path = libs/binn
+	url = https://github.com/liteserver/binn.git

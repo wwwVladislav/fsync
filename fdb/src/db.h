@@ -66,8 +66,10 @@ typedef enum fdb_cursor_op
 bool fdb_map_open(fdb_transaction_t *transaction, char const *name, uint32_t flags, fdb_map_t *pmap);
 void fdb_map_close(fdb_map_t *pmap);
 bool fdb_map_put(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t const *key, fdb_data_t const *value);
+bool fdb_map_put_value(fdb_map_t *pmap, fdb_transaction_t *transaction, char const *key, void const *value, size_t size);
 bool fdb_map_put_unique(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t const *key, fdb_data_t const *value);
 bool fdb_map_get(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t const *key, fdb_data_t *value);
+bool fdb_map_get_value(fdb_map_t *pmap, fdb_transaction_t *transaction, char const *key, void *value, size_t size);
 
 bool fdb_cursor_open(fdb_transaction_t *transaction, fdb_map_t *pmap, fdb_cursor_t *pcursor);
 void fdb_cursor_close(fdb_cursor_t *pcursor);

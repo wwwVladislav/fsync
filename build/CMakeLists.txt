@@ -96,6 +96,7 @@ macro(use_c99)
 endmacro(use_c99)
 
 add_subdirectory(${CMAKE_MODULE_PATH}/binn      binn)
+add_subdirectory(${CMAKE_MODULE_PATH}/lmdb      lmdb)
 add_subdirectory(../futils                      futils)
 add_subdirectory(../fdb                         fdb)
 add_subdirectory(../fsync                       fsync)

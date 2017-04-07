@@ -22,6 +22,7 @@ find_package(Threads REQUIRED)
 
 include_directories(
     ${LIBLMDB_INCLUDES}
+    ${BINN_INCLUDES}
     ../futils/include
     ../fcommon/include
 )
@@ -29,5 +30,5 @@ include_directories(
 message(STATUS "LIBLMDB_INCLUDES = ${LIBLMDB_INCLUDES}")
 
 add_library(fdb SHARED ${FDB_HEADERS} ${FDB_SOURCES})
-add_dependencies(fdb futils lmdb)
-target_link_libraries(fdb futils lmdb Threads::Threads)
+add_dependencies(fdb futils lmdb binn)
+target_link_libraries(fdb futils lmdb binn Threads::Threads)

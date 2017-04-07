@@ -16,6 +16,7 @@ typedef struct
 
 struct filink
 {
+    volatile uint32_t     ref_counter;
     volatile bool         is_active;
     fuuid_t               uuid;
     pthread_t             thread;
@@ -367,6 +368,7 @@ filink_t *filink_bind(fmsgbus_t *pmsgbus, char const *addr, fuuid_t const *uuid)
     }
     memset(ilink, 0, sizeof *ilink);
 
+    ilink->ref_counter = 1;
     ilink->uuid = *uuid;
 
     filink_msgbus_retain(ilink, pmsgbus);
@@ -381,7 +383,7 @@ filink_t *filink_bind(fmsgbus_t *pmsgbus, char const *addr, fuuid_t const *uuid)
     if (!ilink->server)
     {
         FS_ERR("Unable to bind the interlink");
-        filink_unbind(ilink);
+        filink_release(ilink);
         return 0;
     }
 
@@ -396,7 +398,7 @@ filink_t *filink_bind(fmsgbus_t *pmsgbus, char const *addr, fuuid_t const *uuid)
     if (rc)
     {
         FS_ERR("Unable to create the thread for clients processing. Error: %d", rc);
-        filink_unbind(ilink);
+        filink_release(ilink);
         return 0;
     }
 
@@ -419,20 +421,47 @@ void filink_unbind(filink_t *ilink)
         }
 
         fnet_unbind(ilink->server);
-
-        for(int i = 0; i < sizeof ilink->nodes / sizeof *ilink->nodes; ++i)
-        {
-            if (ilink->nodes[i].transport)
-                fnet_disconnect(ilink->nodes[i].transport);
-        }
-
-        filink_msgbus_release(ilink);
-
-        free(ilink);
+        ilink->server = 0;
     }
 }
 
-bool filink_connect(filink_t *ilink, char const *addr)
+static void filink_disconnect_all(filink_t *ilink)
+{
+    for(int i = 0; i < sizeof ilink->nodes / sizeof *ilink->nodes; ++i)
+    {
+        if (ilink->nodes[i].transport)
+            fnet_disconnect(ilink->nodes[i].transport);
+    }
+}
+
+filink_t *filink_retain(filink_t *ilink)
+{
+    if (ilink)
+        ilink->ref_counter++;
+    else
+        FS_ERR("Invalid interlink");
+    return ilink;
+}
+
+void filink_release(filink_t *ilink)
+{
+    if (ilink)
+    {
+        if (!ilink->ref_counter)
+            FS_ERR("Invalid interlink");
+        else if (!--ilink->ref_counter)
+        {
+            filink_unbind(ilink);
+            filink_disconnect_all(ilink);
+            filink_msgbus_release(ilink);
+            free(ilink);
+        }
+    }
+    else
+        FS_ERR("Invalid interlink");
+}
+
+bool filink_connect(filink_t *ilink, char const *addr, fuuid_t *peer_uuid)
 {
     if (!ilink)
     {
@@ -440,9 +469,9 @@ bool filink_connect(filink_t *ilink, char const *addr)
         return false;
     }
 
-    if (!addr)
+    if (!addr || !peer_uuid)
     {
-        FS_ERR("Invalid address");
+        FS_ERR("Invalid argument");
         return false;
     }
 
@@ -455,12 +484,26 @@ bool filink_connect(filink_t *ilink, char const *addr)
     fnet_client_t *pclient = fnet_connect(FNET_SSL, addr);
     if (!pclient) return false;
 
-    fuuid_t peer_uuid;
-    if (!fproto_client_handshake_request(pclient, &ilink->uuid, &peer_uuid))
+    if (!fproto_client_handshake_request(pclient, &ilink->uuid, peer_uuid))
     {
         fnet_disconnect(pclient);
         return false;
     }
 
-    return filink_add_node(ilink, pclient, &peer_uuid);
+    return filink_add_node(ilink, pclient, peer_uuid);
+}
+
+bool filink_is_connected(filink_t *ilink, fuuid_t const *uuid)
+{
+    if (!ilink || !uuid)
+        return false;
+
+    for(int i = 0; i < sizeof ilink->nodes / sizeof *ilink->nodes; ++i)
+    {
+        if (ilink->nodes[i].transport &&
+            memcmp(&ilink->nodes[i].uuid, uuid, sizeof(*uuid)) == 0)
+            return true;
+    }
+
+    return false;
 }

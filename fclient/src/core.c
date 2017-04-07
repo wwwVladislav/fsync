@@ -7,6 +7,7 @@
 #include <filink/interface.h>
 #include <fsync/sync.h>
 #include <fdb/sync/config.h>
+#include <fdb/sync/nodes.h>
 
 static char const *FDB_DATA_SOURCE = "data";
 
@@ -80,7 +81,7 @@ fcore_t *fcore_start(char const *addr)
         return 0;
     }
 
-    FS_INFO("Started node UUID: %llx%llx", pcore->config.uuid.data.u64[0], pcore->config.uuid.data.u64[1]);
+    FS_INFO("Started node UUID: %08llx%08llx", pcore->config.uuid.data.u64[0], pcore->config.uuid.data.u64[1]);
     return pcore;
 }
 
@@ -89,6 +90,7 @@ void fcore_stop(fcore_t *pcore)
     if (pcore)
     {
         filink_unbind(pcore->ilink);
+        filink_release(pcore->ilink);
         fsync_free(pcore->sync);
         fmsgbus_release(pcore->msgbus);
         fdb_release(pcore->db);
@@ -110,7 +112,16 @@ bool fcore_connect(fcore_t *pcore, char const *addr)
         return false;
     }
 
-    return filink_connect(pcore->ilink, addr);
+    fuuid_t peer_uuid = { 0 };
+    if (filink_connect(pcore->ilink, addr, &peer_uuid))
+    {
+        fdb_node_info_t node_info;
+        strncpy(node_info.address, addr, sizeof node_info.address);
+        fdb_node_add(pcore->db, &peer_uuid, &node_info);
+        return true;
+    }
+
+    return false;
 }
 
 bool fcore_sync(fcore_t *pcore, char const *dir)
@@ -127,4 +138,53 @@ bool fcore_sync(fcore_t *pcore, char const *dir)
     pcore->sync = fsync_create(pcore->msgbus, pcore->db, dir, &pcore->config.uuid);
 
     return true;
+}
+
+struct fcore_nodes_iterator
+{
+    filink_t             *ilink;
+    fdb_nodes_iterator_t *nodes_iterator;
+};
+
+bool fcore_nodes_iterator(fcore_t *pcore, fcore_nodes_iterator_t **pit)
+{
+    if (!pcore || !pit)
+    {
+        FS_ERR("Invalid argument");
+        return false;
+    }
+
+    fcore_nodes_iterator_t *it = *pit = malloc(sizeof(fcore_nodes_iterator_t));
+    if (!it)
+        return false;
+    memset(it, 0, sizeof(fcore_nodes_iterator_t));
+    it->ilink = filink_retain(pcore->ilink);
+    return fdb_nodes_iterator(pcore->db, &it->nodes_iterator);
+}
+
+void fcore_nodes_iterator_delete(fcore_nodes_iterator_t *it)
+{
+    if (it)
+    {
+        filink_release(it->ilink);
+        fdb_nodes_iterator_delete(it->nodes_iterator);
+        free(it);
+    }
+}
+
+bool fcore_nodes_next(fcore_nodes_iterator_t *it, fcore_node_info_t *info)
+{
+    if (!it || !info)
+        return false;
+
+    fdb_node_info_t node_info = { 0 };
+    bool ret = fdb_nodes_next(it->nodes_iterator, &info->uuid, &node_info);
+    if (ret)
+    {
+        strncpy(info->address, node_info.address, sizeof info->address);
+        info->connected = filink_is_connected(it->ilink, &info->uuid);
+        return true;
+    }
+
+    return false;
 }

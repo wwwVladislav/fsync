@@ -86,7 +86,7 @@ void fdb_release(fdb_t *pdb)
     if (pdb)
     {
         if (!pdb->ref_counter)
-            FS_ERR("Invalid message bus");
+            FS_ERR("Invalid DB handler");
         else if (!--pdb->ref_counter)
         {
             mdb_env_close(pdb->env);
@@ -94,7 +94,7 @@ void fdb_release(fdb_t *pdb)
         }
     }
     else
-        FS_ERR("Invalid message bus");
+        FS_ERR("Invalid DB handler");
 }
 
 bool fdb_transaction_start(fdb_t *pdb, fdb_transaction_t *ptransaction)

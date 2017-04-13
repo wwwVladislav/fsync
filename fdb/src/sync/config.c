@@ -4,6 +4,7 @@
 static char const *TBL_CONFIG = "config";
 static char const *CFG_UUID = "uuid";
 static char const *CFG_ADDRESS = "address";
+static char const *CFG_SYNC_DIR = "dir";
 
 bool fdb_load_config(fdb_t *pdb, fconfig_t *config)
 {
@@ -20,6 +21,7 @@ bool fdb_load_config(fdb_t *pdb, fconfig_t *config)
         {
             ret = fdb_map_get_value(&map, &transaction, CFG_UUID, &config->uuid, sizeof config->uuid);
             ret &= fdb_map_get_value(&map, &transaction, CFG_ADDRESS, &config->address, sizeof config->address);
+            fdb_map_get_value(&map, &transaction, CFG_SYNC_DIR, &config->sync_dir, sizeof config->sync_dir);
             fdb_map_close(&map);
         }
         fdb_transaction_abort(&transaction);
@@ -43,6 +45,7 @@ bool fdb_save_config(fdb_t *pdb, fconfig_t const *config)
         {
             ret = fdb_map_put_value(&map, &transaction, CFG_UUID, &config->uuid, sizeof config->uuid);
             ret &= fdb_map_put_value(&map, &transaction, CFG_ADDRESS, config->address, strlen(config->address));
+            ret &= fdb_map_put_value(&map, &transaction, CFG_SYNC_DIR, config->sync_dir, strlen(config->sync_dir));
             fdb_transaction_commit(&transaction);
             fdb_map_close(&map);
         }

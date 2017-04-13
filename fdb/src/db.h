@@ -59,8 +59,11 @@ typedef enum fdb_cursor_op
     FDB_FIRST,                              // Position at first key/data item
     FDB_CURRENT,                            // Return key/data at current cursor position
     FDB_LAST,                               // Position at last key/data item
+    FDB_LAST_DUP,                           // Position at last data item of current key. Only for MDB_DUPSORT
     FDB_NEXT,                               // Position at next data item
-    FDB_PREV                                // Position at previous data item
+    FDB_NEXT_DUP,                           // Position at next data item of current key. Only for MDB_DUPSORT
+    FDB_PREV,                               // Position at previous data item
+    FDB_SET                                 // Position at specified key
 } fdb_cursor_op_t;
 
 bool fdb_map_open(fdb_transaction_t *transaction, char const *name, uint32_t flags, fdb_map_t *pmap);
@@ -70,8 +73,9 @@ bool fdb_map_put_value(fdb_map_t *pmap, fdb_transaction_t *transaction, char con
 bool fdb_map_put_unique(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t const *key, fdb_data_t const *value);
 bool fdb_map_get(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t const *key, fdb_data_t *value);
 bool fdb_map_get_value(fdb_map_t *pmap, fdb_transaction_t *transaction, char const *key, void *value, size_t size);
+bool fdb_map_del(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t const *key, fdb_data_t const *value);
 
-bool fdb_cursor_open(fdb_transaction_t *transaction, fdb_map_t *pmap, fdb_cursor_t *pcursor);
+bool fdb_cursor_open(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_cursor_t *pcursor);
 void fdb_cursor_close(fdb_cursor_t *pcursor);
 bool fdb_cursor_get(fdb_cursor_t *pcursor, fdb_data_t *key, fdb_data_t *value, fdb_cursor_op_t op);
 

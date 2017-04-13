@@ -5,6 +5,7 @@ set(FDB_HEADERS
     src/sync/files.h
     src/sync/nodes.h
     src/sync/config.h
+    src/sync/ids.h
     src/db.h
 )
 
@@ -12,6 +13,7 @@ set(FDB_SOURCES
     src/sync/files.c
     src/sync/nodes.c
     src/sync/config.c
+    src/sync/ids.c
     src/db.c
 )
 

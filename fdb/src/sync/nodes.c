@@ -69,7 +69,7 @@ bool fdb_nodes_iterator(fdb_t *pdb, fdb_nodes_iterator_t **pit)
     memset(it, 0, sizeof(fdb_nodes_iterator_t));
     return fdb_transaction_start(pdb, &it->transaction)
            && fdb_map_open(&it->transaction, TBL_NODES, FDB_MAP_CREATE, &it->map)
-           && fdb_cursor_open(&it->transaction, &it->map, &it->cursor);
+           && fdb_cursor_open(&it->map, &it->transaction, &it->cursor);
 }
 
 void fdb_nodes_iterator_delete(fdb_nodes_iterator_t *it)

@@ -1,10 +1,11 @@
 #include <fdb/db.h>
+#include <fdb/sync/ids.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
 
-void fbd_test()
+static void fbd_simple_test()
 {
     fdb_t *pdb = fdb_open("test", 4u, 1u, 16 * 1024 * 1024);
     if (pdb)
@@ -38,7 +39,7 @@ void fbd_test()
                 if (fdb_transaction_start(pdb, &transaction))
                 {
                     fdb_cursor_t cursor = { 0 };
-                    if (fdb_cursor_open(&transaction, &map, &cursor))
+                    if (fdb_cursor_open(&map, &transaction, &cursor))
                     {
                         fdb_data_t key, value;
                         while (fdb_cursor_get(&cursor, &key, &value, FDB_NEXT))
@@ -60,4 +61,54 @@ void fbd_test()
         }
         fdb_release(pdb);
     }
+}
+
+static void fbd_ids_test()
+{
+    fdb_t *pdb = fdb_open("test", 4u, 1u, 16 * 1024 * 1024);
+    if (pdb)
+    {
+        uint32_t ids[5] = { FINVALID_ID, FINVALID_ID, FINVALID_ID, FINVALID_ID, FINVALID_ID};
+
+        fdb_ids_transaction_t *transaction = fdb_ids_transaction_start(pdb, "ids");
+        if (transaction)
+        {
+            if (fdb_id_generate(transaction, ids + 0)
+                && fdb_id_generate(transaction, ids + 1)
+                && fdb_id_generate(transaction, ids + 2)
+                && fdb_id_generate(transaction, ids + 3))
+                fdb_ids_transaction_commit(transaction);
+        }
+
+        transaction = fdb_ids_transaction_start(pdb, "ids");
+        if (transaction)
+        {
+            if (fdb_id_free(transaction, ids[2])
+                && fdb_id_free(transaction, ids[1]))
+                fdb_ids_transaction_commit(transaction);
+        }
+
+        transaction = fdb_ids_transaction_start(pdb, "ids");
+        if (transaction)
+        {
+            if (fdb_id_generate(transaction, ids + 1)
+                && fdb_id_generate(transaction, ids + 2)
+                && fdb_id_generate(transaction, ids + 4))
+                fdb_ids_transaction_commit(transaction);
+        }
+
+        if (ids[4] != ids[3] + 1
+            && ids[3] != ids[2] + 1
+            && ids[2] != ids[1] + 1
+            && ids[1] != ids[0] + 1)
+            printf("fbd_ids_test failed!\n");
+
+        fdb_release(pdb);
+    }
+}
+
+void fbd_test()
+{
+    fbd_simple_test();
+    fbd_ids_test();
 }

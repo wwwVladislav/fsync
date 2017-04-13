@@ -4,8 +4,8 @@
 #include <futils/uuid.h>
 #include <fcommon/limits.h>
 #include <time.h>
-
-#define FINVALID_ID (~0u)
+#include "../db.h"
+#include "ids.h"
 
 typedef enum
 {
@@ -25,11 +25,16 @@ typedef struct
 } ffile_info_t;
 
 typedef struct fdb_files_iterator fdb_files_iterator_t;
+typedef struct fdb_files_transaction fdb_files_transaction_t;
 
-bool fdb_file_add(fuuid_t const *uuid, ffile_info_t *info);
+fdb_files_transaction_t *fdb_files_transaction_start(fdb_t *pdb, fuuid_t const *uuid);
+void fdb_files_transaction_commit(fdb_files_transaction_t *);
+void fdb_files_transaction_abort(fdb_files_transaction_t *);
+
+bool fdb_file_add(fdb_files_transaction_t *transaction, ffile_info_t *info);
 bool fdb_file_add_unique(fuuid_t const *uuid, ffile_info_t *info);
-bool fdb_file_del(fuuid_t const *uuid, char const *path);
-bool fdb_file_get(fuuid_t const *uuid, char const *path, ffile_info_t *info);
+bool fdb_file_del(fdb_files_transaction_t *transaction, char const *path);
+bool fdb_file_get(fdb_files_transaction_t *transaction, char const *path, ffile_info_t *info);
 bool fdb_file_get_if_not_exist(fuuid_t const *uuid, ffile_info_t *info);
 bool fdb_file_del_all(fuuid_t const *uuid);
 bool fdb_file_update(fuuid_t const *uuid, ffile_info_t const *info);

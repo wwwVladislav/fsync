@@ -117,19 +117,25 @@ bool fdb_transaction_start(fdb_t *pdb, fdb_transaction_t *ptransaction)
 void fdb_transaction_commit(fdb_transaction_t *transaction)
 {
     MDB_txn *txn = (MDB_txn*)transaction->ptransaction;
-    int rc = mdb_txn_commit(txn);
-    if(rc != MDB_SUCCESS)
-        FS_ERR("The LMDB transaction wasn't committed: \'%s\'", mdb_strerror(rc));
-    fdb_release(transaction->pdb);
-    memset(transaction, 0, sizeof *transaction);
+    if (txn)
+    {
+        int rc = mdb_txn_commit(txn);
+        if(rc != MDB_SUCCESS)
+            FS_ERR("The LMDB transaction wasn't committed: \'%s\'", mdb_strerror(rc));
+        fdb_release(transaction->pdb);
+        memset(transaction, 0, sizeof *transaction);
+    }
 }
 
 void fdb_transaction_abort(fdb_transaction_t *transaction)
 {
     MDB_txn *txn = (MDB_txn*)transaction->ptransaction;
-    mdb_txn_abort(txn);
-    fdb_release(transaction->pdb);
-    memset(transaction, 0, sizeof *transaction);
+    if (txn)
+    {
+        mdb_txn_abort(txn);
+        fdb_release(transaction->pdb);
+        memset(transaction, 0, sizeof *transaction);
+    }
 }
 
 bool fdb_map_open(fdb_transaction_t *transaction, char const *name, uint32_t flags, fdb_map_t *pmap)
@@ -239,7 +245,7 @@ bool fdb_map_get(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t con
 
     if (!txn)
     {
-        FS_ERR("Invalid operation. The data should be retrieved in transaction.");
+        FS_ERR("Invalid transaction");
         return false;
     }
 
@@ -269,7 +275,35 @@ bool fdb_map_get_value(fdb_map_t *pmap, fdb_transaction_t *transaction, char con
     return false;
 }
 
-bool fdb_cursor_open(fdb_transaction_t *transaction, fdb_map_t *pmap, fdb_cursor_t *pcursor)
+bool fdb_map_del(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_data_t const *key, fdb_data_t const *value)
+{
+    if (!pmap || !key || !transaction)
+        return false;
+
+    MDB_txn *txn = (MDB_txn*)transaction->ptransaction;
+    MDB_dbi dbi = (MDB_dbi)pmap->dbmap;
+
+    if (!txn)
+    {
+        FS_ERR("Invalid transaction");
+        return false;
+    }
+
+    int rc = mdb_del(txn, dbi, (MDB_val*)key, (MDB_val*)value);
+
+    if (rc == MDB_NOTFOUND)
+        return false;
+
+    if(rc != MDB_SUCCESS)
+    {
+        FS_ERR("Unable to delete data from LMDB database: \'%s\'", mdb_strerror(rc));
+        return false;
+    }
+
+    return true;
+}
+
+bool fdb_cursor_open(fdb_map_t *pmap, fdb_transaction_t *transaction, fdb_cursor_t *pcursor)
 {
     if (!transaction || !pmap || !pcursor)
         return false;
@@ -310,8 +344,11 @@ bool fdb_cursor_get(fdb_cursor_t *pcursor, fdb_data_t *key, fdb_data_t *value, f
     MDB_cursor_op const cursor_op = op == FDB_FIRST ? MDB_FIRST :
                                     op == FDB_CURRENT ? MDB_GET_CURRENT :
                                     op == FDB_LAST ? MDB_LAST :
+                                    op == FDB_LAST_DUP ? MDB_LAST_DUP :
                                     op == FDB_NEXT ? MDB_NEXT :
+                                    op == FDB_NEXT_DUP ? MDB_NEXT_DUP :
                                     op == FDB_PREV ? MDB_PREV :
+                                    op == FDB_SET ? MDB_SET :
                                     MDB_FIRST;
     MDB_cursor *cursor = (MDB_cursor *)pcursor->pcursor;
 

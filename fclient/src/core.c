@@ -81,7 +81,8 @@ fcore_t *fcore_start(char const *addr)
         return 0;
     }
 
-    FS_INFO("Started node UUID: %08llx%08llx", pcore->config.uuid.data.u64[0], pcore->config.uuid.data.u64[1]);
+    char buf[2 * sizeof(fuuid_t) + 1] = { 0 };
+    FS_INFO("Started node UUID: %s", fuuid2str(&pcore->config.uuid, buf, sizeof buf));
     return pcore;
 }
 

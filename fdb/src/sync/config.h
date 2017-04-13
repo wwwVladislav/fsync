@@ -8,6 +8,7 @@ typedef struct
 {
     fuuid_t uuid;
     char address[FMAX_ADDR];
+    char sync_dir[FMAX_PATH];
 } fconfig_t;
 
 bool fdb_load_config(fdb_t *pdb, fconfig_t *config);

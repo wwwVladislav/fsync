@@ -2,6 +2,7 @@
 #define TYPES_H_FUTILS
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef struct
 {
@@ -13,5 +14,6 @@ typedef struct
 } fuuid_t;
 
 bool fuuid_gen(fuuid_t *);
+char const * fuuid2str(fuuid_t const *, char *buf, size_t size);
 
 #endif

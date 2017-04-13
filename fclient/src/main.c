@@ -32,14 +32,14 @@ static void fsync(fcore_t *core, char *cmd)
 
 static void fnodes(fcore_t *core)
 {
+    char buf[2 * sizeof(fuuid_t) + 1] = { 0 };
     fcore_nodes_iterator_t *it = 0;
     if (fcore_nodes_iterator(core, &it))
     {
         fcore_node_info_t info = { 0 };
         while(fcore_nodes_next(it, &info))
-            printf("%08llx%08llx %s %s\n",
-                    info.uuid.data.u64[0],
-                    info.uuid.data.u64[1],
+            printf("%s %s %s\n",
+                    fuuid2str(&info.uuid, buf, sizeof buf),
                     info.address,
                     info.connected ? "[Connected]" : "");
         fcore_nodes_iterator_delete(it);

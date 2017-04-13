@@ -5,7 +5,38 @@
 #include <string.h>
 #include <fcommon/limits.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <pthread.h>
+#include <binn.h>
+
+static char const TBL_FILES[] = "/files";
+static char const TBL_IDS[] = "/ids";
+
+static char const *fdb_files_tbl(fuuid_t const *uuid, char *buf, size_t size)
+{
+    if (size < sizeof(fuuid_t) * 2 + sizeof TBL_FILES)
+        return 0;
+    char *ret = buf;
+    fuuid2str(uuid, buf, size);
+    size_t uuid_len = strlen(buf);
+    buf += uuid_len;
+    size -= uuid_len;
+    strncpy(buf, TBL_FILES, size);
+    return ret;
+}
+
+static char const *fdb_ids_tbl(fuuid_t const *uuid, char *buf, size_t size)
+{
+    if (size < sizeof(fuuid_t) * 2 + sizeof TBL_IDS)
+        return 0;
+    char *ret = buf;
+    fuuid2str(uuid, buf, size);
+    size_t uuid_len = strlen(buf);
+    buf += uuid_len;
+    size -= uuid_len;
+    strncpy(buf, TBL_IDS, size);
+    return ret;
+}
 
 enum
 {
@@ -61,6 +92,120 @@ static fdb_sync_files_t sync;
 #define fsdb_pop_lock() pthread_cleanup_pop(1);
 
 
+struct fdb_files_transaction
+{
+    fdb_t                 *pdb;
+    fdb_transaction_t      files_transaction;
+    fdb_map_t              files_map;
+    fdb_ids_transaction_t *ids_transaction;
+};
+
+fdb_files_transaction_t *fdb_files_transaction_start(fdb_t *pdb, fuuid_t const *uuid)
+{
+    if (!pdb || !uuid)
+    {
+        FS_ERR("Invalid arguments");
+        return 0;
+    }
+
+    fdb_files_transaction_t *transaction = malloc(sizeof(fdb_files_transaction_t));
+    if (!transaction)
+    {
+        FS_ERR("No free space of memory");
+        return 0;
+    }
+
+    memset(transaction, 0, sizeof *transaction);
+    transaction->pdb = fdb_retain(pdb);
+    if (!fdb_transaction_start(pdb, &transaction->files_transaction))
+    {
+        FS_ERR("Transaction wasn't started");
+        fdb_files_transaction_abort(transaction);
+        return 0;
+    }
+
+    char files_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILES] = { 0 };
+    fdb_files_tbl(uuid, files_tbl_name, sizeof files_tbl_name);
+
+    if (!fdb_map_open(&transaction->files_transaction, files_tbl_name, FDB_MAP_CREATE, &transaction->files_map))
+    {
+        FS_ERR("Map wasn't created");
+        fdb_files_transaction_abort(transaction);
+        return 0;
+    }
+
+    char ids_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_IDS] = { 0 };
+    fdb_ids_tbl(uuid, ids_tbl_name, sizeof ids_tbl_name);
+
+    transaction->ids_transaction = fdb_ids_transaction_start(pdb, ids_tbl_name);
+    if (!transaction->ids_transaction)
+    {
+        FS_ERR("Map wasn't created");
+        fdb_files_transaction_abort(transaction);
+        return 0;
+    }
+
+    return transaction;
+}
+
+void fdb_files_transaction_commit(fdb_files_transaction_t *transaction)
+{
+    if (transaction)
+    {
+        fdb_transaction_commit(&transaction->files_transaction);
+        fdb_ids_transaction_commit(transaction->ids_transaction);
+        fdb_map_close(&transaction->files_map);
+        fdb_release(transaction->pdb);
+        free(transaction);
+    }
+}
+
+void fdb_files_transaction_abort(fdb_files_transaction_t *transaction)
+{
+    if (transaction)
+    {
+        fdb_transaction_abort(&transaction->files_transaction);
+        fdb_ids_transaction_abort(transaction->ids_transaction);
+        fdb_map_close(&transaction->files_map);
+        fdb_release(transaction->pdb);
+        free(transaction);
+    }
+}
+
+static binn * fdb_file_info_marshal(ffile_info_t const *info)
+{
+    binn *obj = binn_object();
+    if (!binn_object_set_uint32(obj, "id", info->id)
+         || !binn_object_set_uint64(obj, "mtime", (uint64_t)info->mod_time)
+         || !binn_object_set_uint64(obj, "stime", (uint64_t)info->sync_time)
+         || !binn_object_set_blob(obj, "digest", (void *)info->digest.data, sizeof info->digest.data)
+         || !binn_object_set_uint64(obj, "size", info->size)
+         || !binn_object_set_uint32(obj, "status", info->status))
+    {
+        binn_free(obj);
+        obj = 0;
+    }
+    return obj;
+}
+
+static bool fdb_file_info_unmarshal(ffile_info_t *info, void const *data)
+{
+    if (!info || !data)
+        return false;
+    int digest_size = 0;
+    binn *obj = binn_open((void *)data);
+    if (!obj)
+        return false;
+    info->id = binn_object_uint32(obj, "id");
+    info->mod_time = (time_t)binn_object_uint64(obj, "mtime");
+    info->sync_time = (time_t)binn_object_uint64(obj, "stime");
+    memcpy(info->digest.data, binn_object_blob(obj, "digest", &digest_size), sizeof info->digest.data);
+    info->size = binn_object_uint64(obj, "size");
+    info->status = binn_object_uint32(obj, "status");
+    binn_free(obj);
+    return true;
+}
+
 // TODO: for windows paths must be compared in lower case
 static int fscompare(const void *pa, const void *pb)
 {
@@ -90,47 +235,26 @@ static void fdb_init()
     sync.mutex = mutex_initializer;
 }
 
-bool fdb_file_add(fuuid_t const *uuid, ffile_info_t *info)
+bool fdb_file_add(fdb_files_transaction_t *transaction, ffile_info_t *info)
 {
-    fdb_init();
+    if (!transaction || !info || info->id != FINVALID_ID)
+        return false;
 
-    bool ret = false;
+    fdb_file_del(transaction, info->path);
 
-    fsdb_push_lock(sync.mutex);
+    if (!fdb_id_generate(transaction->ids_transaction, &info->id))
+        return false;
 
-    fdb_file_info_t const key = { *uuid, *info };
-    fdb_file_info_t const *pkey = &key;
-    fdb_file_info_t **inf = (fdb_file_info_t **)bsearch(&pkey, sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
+    binn *binfo = fdb_file_info_marshal(info);
+    if (!binfo)
+        return false;
 
-    if (!inf)
-    {
-        fdb_file_info_t *file = (fdb_file_info_t *)fstatic_alloc(sync.files_list_allocator);
+    fdb_data_t const key = { strlen(info->path), info->path };
+    fdb_data_t const value = { binn_size(binfo), binn_ptr(binfo) };
 
-        if (file)
-        {
-            memcpy(&file->uuid, uuid, sizeof *uuid);
-            memcpy(&file->info, info, sizeof *info);
-            if (file->info.id == FINVALID_ID)
-                info->id = file->info.id = sync.next_id++;
-            sync.files_list[sync.files_list_size++] = file;
-            qsort(sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
-            ret = true;
-        }
-        else
-            FS_WARN("Unable to allocate memory for changed file name");
-    }
-    else
-    {
-        (*inf)->info.id = info->id;
-        (*inf)->info.mod_time = info->mod_time;
-        (*inf)->info.sync_time = info->sync_time;
-        (*inf)->info.digest = info->digest;
-        (*inf)->info.size = info->size;
-        (*inf)->info.status = info->status;
-        ret = true;
-    }
+    bool ret = fdb_map_put(&transaction->files_map, &transaction->files_transaction, &key, &value);
 
-    fsdb_pop_lock();
+    binn_free(binfo);
 
     return ret;
 }
@@ -170,8 +294,10 @@ bool fdb_file_add_unique(fuuid_t const *uuid, ffile_info_t *info)
     return ret;
 }
 
-bool fdb_file_del(fuuid_t const *uuid, char const *path)
+bool fdb_file_del(fdb_files_transaction_t *transaction, char const *path)
 {
+    return false;
+#if 0
     fdb_init();
 
     bool ret = false;
@@ -197,10 +323,13 @@ bool fdb_file_del(fuuid_t const *uuid, char const *path)
     fsdb_pop_lock();
 
     return ret;
+#endif
 }
 
-bool fdb_file_get(fuuid_t const *uuid, char const *path, ffile_info_t *info)
+bool fdb_file_get(fdb_files_transaction_t *transaction, char const *path, ffile_info_t *info)
 {
+    return false;
+/*
     fdb_init();
 
     bool ret = false;
@@ -222,6 +351,7 @@ bool fdb_file_get(fuuid_t const *uuid, char const *path, ffile_info_t *info)
     fsdb_pop_lock();
 
     return ret;
+*/
 }
 
 bool fdb_file_get_if_not_exist(fuuid_t const *uuid, ffile_info_t *info)

@@ -189,7 +189,7 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
             info.status = FFILE_DIGEST_IS_CALCULATED;
             if (msg->files[i].is_exist)
                 info.status |= FFILE_IS_EXIST;
-            fdb_file_add(&msg->uuid, &info);
+            // TODO: fdb_file_add(psync->db, &msg->uuid, &info);
 
             info.id = FINVALID_ID;
             info.status = 0;
@@ -507,7 +507,7 @@ static void fsync_scan_dir(fsync_t *psync)
                     fsdir_iterator_path(it, &entry, info.path, sizeof info.path);
                     fsfile_size(full_path, &info.size);
 
-                    fdb_file_add(&psync->uuid, &info);
+                    // TODO: fdb_file_add(psync->db, &psync->uuid, &info);
                 }
             }
             else
@@ -521,7 +521,7 @@ static void fsync_scan_dir(fsync_t *psync)
 
 fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t const *uuid)
 {
-    if (!pmsgbus || !db || dir || !*dir || !uuid)
+    if (!pmsgbus || !db || !dir || !*dir || !uuid)
     {
         FS_ERR("Invalid arguments");
         return 0;

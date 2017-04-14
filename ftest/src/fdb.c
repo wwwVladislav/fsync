@@ -68,41 +68,53 @@ static void fbd_ids_test()
     fdb_t *pdb = fdb_open("test", 4u, 1u, 16 * 1024 * 1024);
     if (pdb)
     {
-        uint32_t ids[5] = { FINVALID_ID, FINVALID_ID, FINVALID_ID, FINVALID_ID, FINVALID_ID};
-
-        fdb_ids_transaction_t *transaction = fdb_ids_transaction_start(pdb, "ids");
-        if (transaction)
+        fdb_transaction_t transaction = {0};
+        if (fdb_transaction_start(pdb, &transaction))
         {
-            if (fdb_id_generate(transaction, ids + 0)
-                && fdb_id_generate(transaction, ids + 1)
-                && fdb_id_generate(transaction, ids + 2)
-                && fdb_id_generate(transaction, ids + 3))
-                fdb_ids_transaction_commit(transaction);
+            fdb_map_t map = {0};
+            if (fdb_ids_map_open(&transaction, "ids", &map))
+            {
+                fdb_transaction_commit(&transaction);
+
+                uint32_t ids[5] = { FINVALID_ID, FINVALID_ID, FINVALID_ID, FINVALID_ID, FINVALID_ID};
+
+                if (fdb_transaction_start(pdb, &transaction))
+                {
+                    if (fdb_id_generate(&map, &transaction, ids + 0)
+                        && fdb_id_generate(&map, &transaction, ids + 1)
+                        && fdb_id_generate(&map, &transaction, ids + 2)
+                        && fdb_id_generate(&map, &transaction, ids + 3))
+                        fdb_transaction_commit(&transaction);
+                }
+                else fdb_transaction_abort(&transaction);
+
+                if (fdb_transaction_start(pdb, &transaction))
+                {
+                    if (fdb_id_free(&map, &transaction, ids[2])
+                        && fdb_id_free(&map, &transaction, ids[1]))
+                        fdb_transaction_commit(&transaction);
+                }
+                else fdb_transaction_abort(&transaction);
+
+                if (fdb_transaction_start(pdb, &transaction))
+                {
+                    if (fdb_id_generate(&map, &transaction, ids + 1)
+                        && fdb_id_generate(&map, &transaction, ids + 2)
+                        && fdb_id_generate(&map, &transaction, ids + 4))
+                        fdb_transaction_commit(&transaction);
+                }
+                else fdb_transaction_abort(&transaction);
+
+                if (ids[4] != ids[3] + 1
+                    && ids[3] != ids[2] + 1
+                    && ids[2] != ids[1] + 1
+                    && ids[1] != ids[0] + 1)
+                    printf("fbd_ids_test failed!\n");
+
+                fdb_map_close(&map);
+            }
+            else fdb_transaction_abort(&transaction);
         }
-
-        transaction = fdb_ids_transaction_start(pdb, "ids");
-        if (transaction)
-        {
-            if (fdb_id_free(transaction, ids[2])
-                && fdb_id_free(transaction, ids[1]))
-                fdb_ids_transaction_commit(transaction);
-        }
-
-        transaction = fdb_ids_transaction_start(pdb, "ids");
-        if (transaction)
-        {
-            if (fdb_id_generate(transaction, ids + 1)
-                && fdb_id_generate(transaction, ids + 2)
-                && fdb_id_generate(transaction, ids + 4))
-                fdb_ids_transaction_commit(transaction);
-        }
-
-        if (ids[4] != ids[3] + 1
-            && ids[3] != ids[2] + 1
-            && ids[2] != ids[1] + 1
-            && ids[1] != ids[0] + 1)
-            printf("fbd_ids_test failed!\n");
-
         fdb_release(pdb);
     }
 }

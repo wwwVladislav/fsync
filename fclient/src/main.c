@@ -50,7 +50,7 @@ static const char CMD_EXIT[4]    = "exit";
 static const char CMD_HELP[4]    = "help";
 static const char CMD_CONNECT[7] = "connect";
 static const char CMD_SYNC[4]    = "sync";
-static const char CMD_NODES[5]    = "nodes";
+static const char CMD_NODES[5]   = "nodes";
 
 int main(int argc, char **argv)
 {

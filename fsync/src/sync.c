@@ -193,7 +193,7 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
 
             info.id = FINVALID_ID;
             info.status = 0;
-            is_need_sync |= fdb_file_add_unique(&psync->uuid, &info);
+            // TODO: is_need_sync |= fdb_file_add_unique(&psync->uuid, &info);
 
             if (info.id != FINVALID_ID)
             {
@@ -298,8 +298,8 @@ static void fsync_file_part_handler(fsync_t *psync, uint32_t msg_type, fmsg_file
                     else
                     {
                         ffile_info_t info;
-                        if(fdb_file_get(&psync->uuid, path + len, &info))
-                            fdb_sync_part_received(&psync->uuid, info.id, msg->block_number);
+                        // TODO: if(fdb_file_get(&psync->uuid, path + len, &info))
+                        // TODO:   fdb_sync_part_received(&psync->uuid, info.id, msg->block_number);
                     }
                 }
                 else FS_ERR("lseek failed");
@@ -344,8 +344,11 @@ static void *fsync_thread(void *param)
             continue;       // Restart if interrupted by handler
 
         printf("Get next file\n");
-        ffile_info_t file_info;
-        while (psync->is_sync_active && fdb_file_get_if_not_exist(&psync->uuid, &file_info))
+        ffile_info_t file_info = { 0 };
+
+        // bool fdb_file_get_by_status(fdb_files_transaction_t *transaction, ffile_status_t status, ffile_info_t *info);
+/* TODO:
+        while (psync->is_sync_active && fdb_file_get_by_status(&psync->uuid, &file_info))
         {
             printf("Search nodes\n");
             // I. Find all nodes where the file is exist
@@ -395,6 +398,7 @@ static void *fsync_thread(void *param)
                     nanosleep(&F10_MSEC, NULL);
             }
         }
+*/ 
     }
 
     return false;
@@ -484,39 +488,52 @@ static void fsync_scan_dir(fsync_t *psync)
 {
     fdb_file_del_all(&psync->uuid);
 
-    fsiterator_t *it = fsdir_iterator(psync->dir);
-
-    time_t const cur_time = time(0);
-
-    for(dirent_t entry; fsdir_iterator_next(it, &entry);)
+    fdb_files_transaction_t *files_transaction = fdb_files_transaction_start(psync->db, &psync->uuid);
+    if (files_transaction)
     {
-        if (entry.type == FS_REG)
+        fsiterator_t *it = fsdir_iterator(psync->dir);
+
+        time_t const cur_time = time(0);
+
+        for(dirent_t entry; fsdir_iterator_next(it, &entry);)
         {
-            ffile_info_t info = { 0 };
-            info.id = FINVALID_ID;
-            info.mod_time = cur_time;
-            info.status = FFILE_IS_EXIST;
-
-            char full_path[FMAX_PATH];
-            size_t full_path_len = fsdir_iterator_full_path(it, &entry, full_path, sizeof full_path);
-            if (full_path_len <= sizeof full_path)
+            if (entry.type == FS_REG)
             {
-                if (fsfile_md5sum(full_path, &info.digest))
-                {
-                    info.status |= FFILE_DIGEST_IS_CALCULATED;
-                    fsdir_iterator_path(it, &entry, info.path, sizeof info.path);
-                    fsfile_size(full_path, &info.size);
+                ffile_info_t info = { 0 };
+                info.id = FINVALID_ID;
+                info.mod_time = cur_time;
+                info.status = FFILE_IS_EXIST;
 
-                    // TODO: fdb_file_add(psync->db, &psync->uuid, &info);
+                char full_path[FMAX_PATH];
+                size_t full_path_len = fsdir_iterator_full_path(it, &entry, full_path, sizeof full_path);
+                if (full_path_len <= sizeof full_path)
+                {
+                    if (fsfile_md5sum(full_path, &info.digest))
+                    {
+                        info.status |= FFILE_DIGEST_IS_CALCULATED;
+                        fsdir_iterator_path(it, &entry, info.path, sizeof info.path);
+                        fsfile_size(full_path, &info.size);
+
+                        if (!fdb_file_add(files_transaction, &info))
+                        {
+                            fdb_files_transaction_abort(files_transaction);
+                            files_transaction = 0;
+                            break;
+                        }
+                    }
                 }
+                else
+                    FS_ERR("Full path length of \'%s\' file is too long.", entry.name);
             }
-            else
-                FS_ERR("Full path length of \'%s\' file is too long.", entry.name);
+        }
+        fsdir_iterator_free(it);
+
+        if (files_transaction)
+        {
+            psync->sync_time = time(0);
+            fdb_files_transaction_commit(files_transaction);
         }
     }
-    fsdir_iterator_free(it);
-
-    psync->sync_time = time(0);
 }
 
 fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t const *uuid)

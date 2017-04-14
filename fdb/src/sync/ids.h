@@ -6,12 +6,8 @@
 
 #define FINVALID_ID (~0u)
 
-typedef struct fdb_ids_transaction fdb_ids_transaction_t;
-
-fdb_ids_transaction_t *fdb_ids_transaction_start(fdb_t *pdb, char const *tbl);
-void fdb_ids_transaction_commit(fdb_ids_transaction_t *transaction);
-void fdb_ids_transaction_abort(fdb_ids_transaction_t *transaction);
-bool fdb_id_generate(fdb_ids_transaction_t *transaction, uint32_t *id);
-bool fdb_id_free(fdb_ids_transaction_t *transaction, uint32_t id);
+bool fdb_ids_map_open(fdb_transaction_t *transaction, char const *tbl, fdb_map_t *pmap);
+bool fdb_id_generate(fdb_map_t *pmap, fdb_transaction_t *transaction, uint32_t *id);
+bool fdb_id_free(fdb_map_t *pmap, fdb_transaction_t *transaction, uint32_t id);
 
 #endif

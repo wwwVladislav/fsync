@@ -15,8 +15,8 @@ typedef enum
 
 typedef struct
 {
-    char     path[FMAX_PATH];   // Path
     uint32_t id;                // Unique file id for node
+    char     path[FMAX_PATH];   // Path
     time_t   mod_time;          // Modification time
     time_t   sync_time;         // Synchronization time
     fmd5_t   digest;            // MD5 sum
@@ -32,13 +32,14 @@ void fdb_files_transaction_commit(fdb_files_transaction_t *);
 void fdb_files_transaction_abort(fdb_files_transaction_t *);
 
 bool fdb_file_add(fdb_files_transaction_t *transaction, ffile_info_t *info);
-bool fdb_file_add_unique(fuuid_t const *uuid, ffile_info_t *info);
-bool fdb_file_del(fdb_files_transaction_t *transaction, char const *path);
-bool fdb_file_get(fdb_files_transaction_t *transaction, char const *path, ffile_info_t *info);
-bool fdb_file_get_if_not_exist(fuuid_t const *uuid, ffile_info_t *info);
+bool fdb_file_add_unique(fdb_files_transaction_t *transaction, ffile_info_t *info);
+bool fdb_file_del(fdb_files_transaction_t *transaction, uint32_t id);
+bool fdb_file_get(fdb_files_transaction_t *transaction, uint32_t id, ffile_info_t *info);
+bool fdb_file_id(fdb_files_transaction_t *transaction, char const *path, uint32_t *id);
+bool fdb_file_get_by_status(fdb_files_transaction_t *transaction, ffile_status_t status, ffile_info_t *info);
+bool fdb_file_get_by_path(fdb_files_transaction_t *transaction, char const *path, ffile_info_t *info);
 bool fdb_file_del_all(fuuid_t const *uuid);
-bool fdb_file_update(fuuid_t const *uuid, ffile_info_t const *info);
-bool fdb_file_path(fuuid_t const *uuid, uint32_t id, char *path, size_t size);
+bool fdb_file_path(fdb_files_transaction_t *transaction, uint32_t id, char *path, size_t size);
 bool fdb_sync_start(uint32_t id, uint32_t threshold_delta_time, uint32_t requested_parts_threshold, uint64_t size);
 bool fdb_sync_next_part(uint32_t id, uint32_t *part, bool *completed);
 void fdb_sync_part_received(fuuid_t const *uuid, uint32_t id, uint32_t part);
@@ -49,8 +50,8 @@ typedef enum
     FDB_DIFF_CONTENT
 } fdb_diff_kind_t;
 
-fdb_files_iterator_t *fdb_files_iterator(fuuid_t const *uuid);
-fdb_files_iterator_t *fdb_files_iterator_diff(fuuid_t const *uuid0, fuuid_t const *uuid1);    // return differences in files list for uuid0 and uuid1
+fdb_files_iterator_t *fdb_files_iterator(fdb_files_transaction_t *transaction);
+fdb_files_iterator_t *fdb_files_iterator_diff(fdb_files_transaction_t *transaction, fuuid_t const *uuid);    // return differences in files list for current uuid and other uuid
 void                  fdb_files_iterator_free(fdb_files_iterator_t *);
 bool                  fdb_files_iterator_first(fdb_files_iterator_t *, ffile_info_t *, fdb_diff_kind_t *);
 bool                  fdb_files_iterator_next(fdb_files_iterator_t *, ffile_info_t *, fdb_diff_kind_t *);

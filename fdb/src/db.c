@@ -330,8 +330,10 @@ void fdb_cursor_close(fdb_cursor_t *pcursor)
     if (pcursor)
     {
         MDB_cursor *cursor = pcursor->pcursor;
-        mdb_cursor_close(cursor);
-        fdb_release(pcursor->pdb);
+        if (cursor)
+            mdb_cursor_close(cursor);
+        if (pcursor->pdb)
+            fdb_release(pcursor->pdb);
         memset(pcursor, 0, sizeof *pcursor);
     }
 }

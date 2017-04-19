@@ -83,6 +83,7 @@ fcore_t *fcore_start(char const *addr)
 
     char buf[2 * sizeof(fuuid_t) + 1] = { 0 };
     FS_INFO("Started node UUID: %s", fuuid2str(&pcore->config.uuid, buf, sizeof buf));
+    FS_INFO("Listening: %s", pcore->config.address);
     return pcore;
 }
 

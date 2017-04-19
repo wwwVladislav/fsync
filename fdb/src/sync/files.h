@@ -25,21 +25,22 @@ typedef struct
 } ffile_info_t;
 
 typedef struct fdb_files_iterator fdb_files_iterator_t;
-typedef struct fdb_files_transaction fdb_files_transaction_t;
+typedef struct fdb_files_diff_iterator fdb_files_diff_iterator_t;
+typedef struct fdb_files_map fdb_files_map_t;
 
-fdb_files_transaction_t *fdb_files_transaction_start(fdb_t *pdb, fuuid_t const *uuid);
-void fdb_files_transaction_commit(fdb_files_transaction_t *);
-void fdb_files_transaction_abort(fdb_files_transaction_t *);
+fdb_files_map_t *fdb_files_open(fdb_transaction_t *transaction, fuuid_t const *uuid);
+fdb_files_map_t *fdb_files_retain(fdb_files_map_t *files_map);
+void fdb_files_release(fdb_files_map_t *files_map);
 
-bool fdb_file_add(fdb_files_transaction_t *transaction, ffile_info_t *info);
-bool fdb_file_add_unique(fdb_files_transaction_t *transaction, ffile_info_t *info);
-bool fdb_file_del(fdb_files_transaction_t *transaction, uint32_t id);
-bool fdb_file_get(fdb_files_transaction_t *transaction, uint32_t id, ffile_info_t *info);
-bool fdb_file_id(fdb_files_transaction_t *transaction, char const *path, uint32_t *id);
-bool fdb_file_get_by_status(fdb_files_transaction_t *transaction, ffile_status_t status, ffile_info_t *info);
-bool fdb_file_get_by_path(fdb_files_transaction_t *transaction, char const *path, ffile_info_t *info);
+bool fdb_file_add(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ffile_info_t *info);
+bool fdb_file_add_unique(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ffile_info_t *info);
+bool fdb_file_del(fdb_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id);
+bool fdb_file_get(fdb_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id, ffile_info_t *info);
+bool fdb_file_id(fdb_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, uint32_t *id);
+bool fdb_file_get_by_status(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ffile_status_t status, ffile_info_t *info);
+bool fdb_file_get_by_path(fdb_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, ffile_info_t *info);
 bool fdb_file_del_all(fuuid_t const *uuid);
-bool fdb_file_path(fdb_files_transaction_t *transaction, uint32_t id, char *path, size_t size);
+bool fdb_file_path(fdb_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id, char *path, size_t size);
 bool fdb_sync_start(uint32_t id, uint32_t threshold_delta_time, uint32_t requested_parts_threshold, uint64_t size);
 bool fdb_sync_next_part(uint32_t id, uint32_t *part, bool *completed);
 void fdb_sync_part_received(fuuid_t const *uuid, uint32_t id, uint32_t part);
@@ -50,13 +51,17 @@ typedef enum
     FDB_DIFF_CONTENT
 } fdb_diff_kind_t;
 
-fdb_files_iterator_t *fdb_files_iterator(fdb_files_transaction_t *transaction);
-fdb_files_iterator_t *fdb_files_iterator_diff(fdb_files_transaction_t *transaction, fuuid_t const *uuid);    // return differences in files list for current uuid and other uuid
-void                  fdb_files_iterator_free(fdb_files_iterator_t *);
-bool                  fdb_files_iterator_first(fdb_files_iterator_t *, ffile_info_t *, fdb_diff_kind_t *);
-bool                  fdb_files_iterator_next(fdb_files_iterator_t *, ffile_info_t *, fdb_diff_kind_t *);
-bool                  fdb_files_iterator_uuid(fdb_files_iterator_t *, ffile_info_t *);
-uint32_t              fdb_get_uuids(fuuid_t uuids[FMAX_CONNECTIONS_NUM]);
-uint32_t              fdb_get_uuids_where_file_is_exist(fuuid_t uuids[FMAX_CONNECTIONS_NUM], uint32_t ids[FMAX_CONNECTIONS_NUM], char const *path);
+fdb_files_iterator_t      *fdb_files_iterator(fdb_files_map_t *files_map, fdb_transaction_t *transaction);
+void                       fdb_files_iterator_free(fdb_files_iterator_t *);
+bool                       fdb_files_iterator_first(fdb_files_iterator_t *, ffile_info_t *);
+bool                       fdb_files_iterator_next(fdb_files_iterator_t *, ffile_info_t *);
+
+fdb_files_diff_iterator_t *fdb_files_diff_iterator(fdb_files_map_t *map_1, fdb_files_map_t *map_2, fdb_transaction_t *transaction);
+void                       fdb_files_diff_iterator_free(fdb_files_diff_iterator_t *);
+bool                       fdb_files_diff_iterator_first(fdb_files_diff_iterator_t *, ffile_info_t *, fdb_diff_kind_t *);
+bool                       fdb_files_diff_iterator_next(fdb_files_diff_iterator_t *, ffile_info_t *, fdb_diff_kind_t *);
+
+uint32_t                   fdb_get_uuids(fuuid_t uuids[FMAX_CONNECTIONS_NUM]);
+uint32_t                   fdb_get_uuids_where_file_is_exist(fuuid_t uuids[FMAX_CONNECTIONS_NUM], uint32_t ids[FMAX_CONNECTIONS_NUM], char const *path);
 
 #endif

@@ -82,49 +82,43 @@ static fdb_sync_files_t sync;
 #define fsdb_pop_lock() pthread_cleanup_pop(1);
 
 
-struct fdb_files_transaction
+struct fdb_files_map
 {
-    fdb_t                 *pdb;
-    fdb_transaction_t      transaction;
-    fdb_map_t              files_map;
-    fdb_map_t              ids_map;
-    fdb_map_t              path_ids_map;
-    fdb_map_t              status_map;
+    volatile uint32_t   ref_counter;
+    fdb_map_t           files_map;
+    fdb_map_t           ids_map;
+    fdb_map_t           path_ids_map;
+    fdb_map_t           status_map;
 };
 
-fdb_files_transaction_t *fdb_files_transaction_start(fdb_t *pdb, fuuid_t const *uuid)
+fdb_files_map_t *fdb_files_open(fdb_transaction_t *transaction, fuuid_t const *uuid)
 {
-    if (!pdb || !uuid)
+    if (!transaction || !uuid)
     {
         FS_ERR("Invalid arguments");
         return 0;
     }
 
-    fdb_files_transaction_t *transaction = malloc(sizeof(fdb_files_transaction_t));
-    if (!transaction)
+    fdb_files_map_t *files_map = malloc(sizeof(fdb_files_map_t));
+    if (!files_map)
     {
         FS_ERR("No free space of memory");
         return 0;
     }
 
-    memset(transaction, 0, sizeof *transaction);
-    transaction->pdb = fdb_retain(pdb);
+    memset(files_map, 0, sizeof *files_map);
 
-    if (!fdb_transaction_start(pdb, &transaction->transaction))
-    {
-        FS_ERR("Transaction wasn't started");
-        fdb_files_transaction_abort(transaction);
-        return 0;
-    }
+    files_map->ref_counter = 1;
 
     // id->file_info
     char files_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILE_INFO] = { 0 };
     fdb_tbl_name(uuid, files_tbl_name, sizeof files_tbl_name, TBL_FILE_INFO);
 
-    if (!fdb_map_open(&transaction->transaction, files_tbl_name, FDB_MAP_CREATE | FDB_MAP_INTEGERKEY, &transaction->files_map))
+    if (!fdb_map_open(transaction, files_tbl_name, FDB_MAP_CREATE | FDB_MAP_INTEGERKEY, &files_map->files_map))
     {
         FS_ERR("Map wasn't created");
-        fdb_files_transaction_abort(transaction);
+        fdb_transaction_abort(transaction);
+        fdb_files_release(files_map);
         return 0;
     }
 
@@ -132,10 +126,11 @@ fdb_files_transaction_t *fdb_files_transaction_start(fdb_t *pdb, fuuid_t const *
     char ids_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILE_ID] = { 0 };
     fdb_tbl_name(uuid, ids_tbl_name, sizeof ids_tbl_name, TBL_FILE_ID);
 
-    if (!fdb_ids_map_open(&transaction->transaction, ids_tbl_name, &transaction->ids_map))
+    if (!fdb_ids_map_open(transaction, ids_tbl_name, &files_map->ids_map))
     {
         FS_ERR("Map wasn't created");
-        fdb_files_transaction_abort(transaction);
+        fdb_transaction_abort(transaction);
+        fdb_files_release(files_map);
         return 0;
     }
 
@@ -143,10 +138,11 @@ fdb_files_transaction_t *fdb_files_transaction_start(fdb_t *pdb, fuuid_t const *
     char path_ids_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILE_PATH_ID] = { 0 };
     fdb_tbl_name(uuid, path_ids_tbl_name, sizeof path_ids_tbl_name, TBL_FILE_PATH_ID);
 
-    if (!fdb_map_open(&transaction->transaction, path_ids_tbl_name, FDB_MAP_CREATE, &transaction->path_ids_map))
+    if (!fdb_map_open(transaction, path_ids_tbl_name, FDB_MAP_CREATE, &files_map->path_ids_map))
     {
         FS_ERR("Map wasn't created");
-        fdb_files_transaction_abort(transaction);
+        fdb_transaction_abort(transaction);
+        fdb_files_release(files_map);
         return 0;
     }
 
@@ -154,53 +150,61 @@ fdb_files_transaction_t *fdb_files_transaction_start(fdb_t *pdb, fuuid_t const *
     char file_status_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILE_STATUS] = { 0 };
     fdb_tbl_name(uuid, file_status_tbl_name, sizeof file_status_tbl_name, TBL_FILE_STATUS);
 
-    if (!fdb_statuses_map_open(&transaction->transaction, file_status_tbl_name, &transaction->status_map))
+    if (!fdb_statuses_map_open(transaction, file_status_tbl_name, &files_map->status_map))
     {
         FS_ERR("Map wasn't created");
-        fdb_files_transaction_abort(transaction);
+        fdb_transaction_abort(transaction);
+        fdb_files_release(files_map);
         return 0;
     }
 
-    return transaction;
+    return files_map;
 }
 
-void fdb_files_transaction_commit(fdb_files_transaction_t *transaction)
+fdb_files_map_t *fdb_files_retain(fdb_files_map_t *files_map)
 {
-    if (transaction)
-    {
-        fdb_transaction_commit(&transaction->transaction);
-        fdb_map_close(&transaction->files_map);
-        fdb_map_close(&transaction->ids_map);
-        fdb_map_close(&transaction->path_ids_map);
-        fdb_map_close(&transaction->status_map);
-        fdb_release(transaction->pdb);
-        free(transaction);
-    }
+    if (files_map)
+        files_map->ref_counter++;
+    else
+        FS_ERR("Invalid files map");
+    return files_map;
 }
 
-void fdb_files_transaction_abort(fdb_files_transaction_t *transaction)
+void fdb_files_release(fdb_files_map_t *files_map)
 {
-    if (transaction)
+    if (files_map)
     {
-        fdb_transaction_abort(&transaction->transaction);
-        fdb_map_close(&transaction->files_map);
-        fdb_map_close(&transaction->ids_map);
-        fdb_map_close(&transaction->path_ids_map);
-        fdb_map_close(&transaction->status_map);
-        fdb_release(transaction->pdb);
-        free(transaction);
+        if (!files_map->ref_counter)
+            FS_ERR("Invalid files map");
+        else if (!--files_map->ref_counter)
+        {
+            fdb_map_close(&files_map->files_map);
+            fdb_map_close(&files_map->ids_map);
+            fdb_map_close(&files_map->path_ids_map);
+            fdb_map_close(&files_map->status_map);
+            free(files_map);
+        }
     }
+    else
+        FS_ERR("Invalid files map");
 }
+
+static char STR_PATH[] = "path";
+static char STR_MTIME[] = "mtime";
+static char STR_STIME[] = "stime";
+static char STR_DIGEST[] = "digest";
+static char STR_SIZE[] = "size";
+static char STR_STATUS[] = "status";
 
 static binn * fdb_file_info_marshal(ffile_info_t const *info)
 {
     binn *obj = binn_object();
-    if (!binn_object_set_str(obj, "path", info->path)
-         || !binn_object_set_uint64(obj, "mtime", (uint64_t)info->mod_time)
-         || !binn_object_set_uint64(obj, "stime", (uint64_t)info->sync_time)
-         || !binn_object_set_blob(obj, "digest", (void *)info->digest.data, sizeof info->digest.data)
-         || !binn_object_set_uint64(obj, "size", info->size)
-         || !binn_object_set_uint32(obj, "status", info->status))
+    if (!binn_object_set_str(obj, STR_PATH, (char *)info->path)
+         || !binn_object_set_uint64(obj, STR_MTIME, (uint64_t)info->mod_time)
+         || !binn_object_set_uint64(obj, STR_STIME, (uint64_t)info->sync_time)
+         || !binn_object_set_blob(obj, STR_DIGEST, (void *)info->digest.data, sizeof info->digest.data)
+         || !binn_object_set_uint64(obj, STR_SIZE, info->size)
+         || !binn_object_set_uint32(obj, STR_STATUS, info->status))
     {
         binn_free(obj);
         obj = 0;
@@ -216,30 +220,18 @@ static bool fdb_file_info_unmarshal(ffile_info_t *info, void const *data)
     binn *obj = binn_open((void *)data);
     if (!obj)
         return false;
-    char const *path = binn_object_str(obj, "path");
+    char const *path = binn_object_str(obj, STR_PATH);
     if (path) strncpy(info->path, path, sizeof info->path);
-    info->mod_time = (time_t)binn_object_uint64(obj, "mtime");
-    info->sync_time = (time_t)binn_object_uint64(obj, "stime");
-    memcpy(info->digest.data, binn_object_blob(obj, "digest", &digest_size), sizeof info->digest.data);
-    info->size = binn_object_uint64(obj, "size");
-    info->status = binn_object_uint32(obj, "status");
+    info->mod_time = (time_t)binn_object_uint64(obj, STR_MTIME);
+    info->sync_time = (time_t)binn_object_uint64(obj, STR_STIME);
+    memcpy(info->digest.data, binn_object_blob(obj, STR_DIGEST, &digest_size), sizeof info->digest.data);
+    info->size = binn_object_uint64(obj, STR_SIZE);
+    info->status = binn_object_uint32(obj, STR_STATUS);
     binn_free(obj);
     return true;
 }
 
-// TODO: for windows paths must be compared in lower case
-static int fscompare(const void *pa, const void *pb)
-{
-    fdb_file_info_t const *lhs = *(fdb_file_info_t const **)pa;
-    fdb_file_info_t const *rhs = *(fdb_file_info_t const **)pb;
-
-    int ret = memcmp(&lhs->uuid, &rhs->uuid, sizeof rhs->uuid);
-    if (ret == 0)
-        return strncmp(lhs->info.path, rhs->info.path, sizeof rhs->info.path);
-
-    return ret;
-}
-
+// TODO: delete
 static void fdb_init()
 {
     if (sync.files_list_allocator)
@@ -256,16 +248,17 @@ static void fdb_init()
     sync.mutex = mutex_initializer;
 }
 
-bool fdb_file_add(fdb_files_transaction_t *transaction, ffile_info_t *info)
+bool fdb_file_add(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ffile_info_t *info)
 {
-    if (!transaction || !info || info->id != FINVALID_ID)
+    if (!transaction || !info)
         return false;
 
     ffile_info_t old_info = { 0 };
 
-    if (!fdb_file_get_by_path(transaction, info->path, &old_info))
+    if (!fdb_file_get_by_path(files_map, transaction, info->path, &old_info))
     {
-        if (!fdb_id_generate(&transaction->ids_map, &transaction->transaction, &info->id))
+        if (info->id == FINVALID_ID
+            && !fdb_id_generate(&files_map->ids_map, transaction, &info->id))
             return false;
     }
     else
@@ -279,29 +272,29 @@ bool fdb_file_add(fdb_files_transaction_t *transaction, ffile_info_t *info)
     fdb_data_t const file_info = { binn_size(binfo), binn_ptr(binfo) };
     fdb_data_t const file_path = { strlen(info->path), info->path };
 
-    bool ret = fdb_map_put(&transaction->files_map, &transaction->transaction, &file_id, &file_info)
-                && fdb_map_put(&transaction->path_ids_map, &transaction->transaction, &file_path, &file_id);
+    bool ret = fdb_map_put(&files_map->files_map, transaction, &file_id, &file_info)
+                && fdb_map_put(&files_map->path_ids_map, transaction, &file_path, &file_id);
 
     if ((info->status & FFILE_IS_EXIST) == 0)
-        ret &= fdb_statuses_map_put(&transaction->status_map, &transaction->transaction, FFILE_IS_EXIST, &file_id);
+        ret &= fdb_statuses_map_put(&files_map->status_map, transaction, FFILE_IS_EXIST, &file_id);
     else
-        fdb_statuses_map_del(&transaction->status_map, &transaction->transaction, FFILE_IS_EXIST, &file_id);
+        fdb_statuses_map_del(&files_map->status_map, transaction, FFILE_IS_EXIST, &file_id);
 
     binn_free(binfo);
 
     return ret;
 }
 
-bool fdb_file_add_unique(fdb_files_transaction_t *transaction, ffile_info_t *info)
+bool fdb_file_add_unique(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ffile_info_t *info)
 {
     if (!transaction || !info || info->id != FINVALID_ID)
         return false;
 
     uint32_t id = FINVALID_ID;
 
-    if (!fdb_file_id(transaction, info->path, &id))
+    if (!fdb_file_id(files_map, transaction, info->path, &id))
     {
-        if (!fdb_id_generate(&transaction->ids_map, &transaction->transaction, &info->id))
+        if (!fdb_id_generate(&files_map->ids_map, transaction, &info->id))
             return false;
 
         binn *binfo = fdb_file_info_marshal(info);
@@ -312,11 +305,11 @@ bool fdb_file_add_unique(fdb_files_transaction_t *transaction, ffile_info_t *inf
         fdb_data_t const file_info = { binn_size(binfo), binn_ptr(binfo) };
         fdb_data_t const file_path = { strlen(info->path), info->path };
 
-        bool ret = fdb_map_put(&transaction->files_map, &transaction->transaction, &file_id, &file_info)
-                    && fdb_map_put(&transaction->path_ids_map, &transaction->transaction, &file_path, &file_id);
+        bool ret = fdb_map_put(&files_map->files_map, transaction, &file_id, &file_info)
+                    && fdb_map_put(&files_map->path_ids_map, transaction, &file_path, &file_id);
 
         if ((info->status & FFILE_IS_EXIST) == 0)
-            ret &= fdb_statuses_map_put(&transaction->status_map, &transaction->transaction, FFILE_IS_EXIST, &file_id);
+            ret &= fdb_statuses_map_put(&files_map->status_map, transaction, FFILE_IS_EXIST, &file_id);
 
         binn_free(binfo);
 
@@ -326,45 +319,45 @@ bool fdb_file_add_unique(fdb_files_transaction_t *transaction, ffile_info_t *inf
     return false;
 }
 
-bool fdb_file_del(fdb_files_transaction_t *transaction, uint32_t id)
+bool fdb_file_del(fdb_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id)
 {
     if (!transaction)
         return false;
 
     ffile_info_t info;
-    if (fdb_file_get(transaction, id, &info))
+    if (fdb_file_get(files_map, transaction, id, &info))
     {
         fdb_data_t const file_id = { sizeof id, &id };
         fdb_data_t const file_path = { strlen(info.path), info.path };
 
         if ((info.status & FFILE_IS_EXIST) == 0)
-            fdb_statuses_map_del(&transaction->status_map, &transaction->transaction, FFILE_IS_EXIST, &file_id);
+            fdb_statuses_map_del(&files_map->status_map, transaction, FFILE_IS_EXIST, &file_id);
 
-        return fdb_map_del(&transaction->files_map, &transaction->transaction, &file_id, 0)
-                && fdb_map_del(&transaction->path_ids_map, &transaction->transaction, &file_path, 0)
-                && fdb_id_free(&transaction->ids_map, &transaction->transaction, info.id);
+        return fdb_map_del(&files_map->files_map, transaction, &file_id, 0)
+                && fdb_map_del(&files_map->path_ids_map, transaction, &file_path, 0)
+                && fdb_id_free(&files_map->ids_map, transaction, info.id);
     }
     return false;
 }
 
-bool fdb_file_get(fdb_files_transaction_t *transaction, uint32_t id, ffile_info_t *info)
+bool fdb_file_get(fdb_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id, ffile_info_t *info)
 {
     if (!transaction || !info)
         return false;
     info->id = id;
     fdb_data_t const file_id = { sizeof id, &id };
     fdb_data_t file_info = { 0 };
-    return fdb_map_get(&transaction->files_map, &transaction->transaction, &file_id, &file_info)
+    return fdb_map_get(&files_map->files_map, transaction, &file_id, &file_info)
             && fdb_file_info_unmarshal(info, file_info.data);
 }
 
-bool fdb_file_id(fdb_files_transaction_t *transaction, char const *path, uint32_t *id)
+bool fdb_file_id(fdb_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, uint32_t *id)
 {
     if (!transaction || !path || !id)
         return false;
     fdb_data_t const file_path = { strlen(path), (void*)path };
     fdb_data_t file_id = { 0 };
-    if (fdb_map_get(&transaction->path_ids_map, &transaction->transaction, &file_path, &file_id))
+    if (fdb_map_get(&files_map->path_ids_map, transaction, &file_path, &file_id))
     {
         *id = *(uint32_t*)file_id.data;
         return true;
@@ -372,7 +365,7 @@ bool fdb_file_id(fdb_files_transaction_t *transaction, char const *path, uint32_
     return false;
 }
 
-bool fdb_file_get_by_status(fdb_files_transaction_t *transaction, ffile_status_t status, ffile_info_t *info)
+bool fdb_file_get_by_status(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ffile_status_t status, ffile_info_t *info)
 {
     if (!transaction || !info)
         return false;
@@ -381,15 +374,15 @@ bool fdb_file_get_by_status(fdb_files_transaction_t *transaction, ffile_status_t
     fdb_data_t const file_status = { sizeof st, &st };
     fdb_data_t file_id = { 0 };
 
-    return fdb_map_get(&transaction->status_map, &transaction->transaction, &file_status, &file_id)
-            && fdb_file_get(transaction, *(uint32_t*)file_id.data, info);
+    return fdb_map_get(&files_map->status_map, transaction, &file_status, &file_id)
+            && fdb_file_get(files_map, transaction, *(uint32_t*)file_id.data, info);
 }
 
-bool fdb_file_get_by_path(fdb_files_transaction_t *transaction, char const *path, ffile_info_t *info)
+bool fdb_file_get_by_path(fdb_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, ffile_info_t *info)
 {
-    uint32_t id = 0;
-    return fdb_file_id(transaction, path, &id)
-            && fdb_file_get(transaction, id, info);
+    uint32_t id = FINVALID_ID;
+    return fdb_file_id(files_map, transaction, path, &id)
+            && fdb_file_get(files_map, transaction, id, info);
 }
 
 bool fdb_file_del_all(fuuid_t const *uuid)
@@ -398,14 +391,14 @@ bool fdb_file_del_all(fuuid_t const *uuid)
     return true;
 }
 
-bool fdb_file_path(fdb_files_transaction_t *transaction, uint32_t id, char *path, size_t size)
+bool fdb_file_path(fdb_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id, char *path, size_t size)
 {
     if (!transaction || !path)
         return false;
 
     ffile_info_t info = { 0 };
 
-    if (fdb_file_get(transaction, id, &info))
+    if (fdb_file_get(files_map, transaction, id, &info))
     {
         strncpy(path, info.path, size);
         return true;
@@ -414,21 +407,22 @@ bool fdb_file_path(fdb_files_transaction_t *transaction, uint32_t id, char *path
     return false;
 }
 
-typedef enum
-{
-    FDB_ITERATE_ALL = 0,
-    FDB_ITERATE_DIFF
-} fdb_iterator_t;
-
 struct fdb_files_iterator
 {
-    fdb_files_transaction_t *transaction;
-    fdb_iterator_t           type;
-    fuuid_t                  uuid;
+    fdb_transaction_t       *transaction;
+    fdb_files_map_t         *files_map;
     fdb_cursor_t             cursor;
 };
 
-fdb_files_iterator_t *fdb_files_iterator(fdb_files_transaction_t *transaction)
+struct fdb_files_diff_iterator
+{
+    fdb_transaction_t       *transaction;
+    fdb_files_map_t         *files_map_1;
+    fdb_files_map_t         *files_map_2;
+    fdb_cursor_t             cursor;
+};
+
+fdb_files_iterator_t *fdb_files_iterator(fdb_files_map_t *files_map, fdb_transaction_t *transaction)
 {
     if (!transaction)
         return 0;
@@ -442,35 +436,9 @@ fdb_files_iterator_t *fdb_files_iterator(fdb_files_transaction_t *transaction)
     memset(piterator, 0, sizeof *piterator);
 
     piterator->transaction = transaction;
-    piterator->type = FDB_ITERATE_ALL;
+    piterator->files_map = fdb_files_retain(files_map);
 
-    if (!fdb_cursor_open(&transaction->path_ids_map, transaction->transaction, &piterator->cursor))
-    {
-        fdb_files_iterator_free(piterator);
-        return 0;
-    }
-
-    return piterator;
-}
-
-fdb_files_iterator_t *fdb_files_iterator_diff(fdb_files_transaction_t *transaction, fuuid_t const *uuid)
-{
-    if (!transaction || !uuid)
-        return 0;
-
-    fdb_files_iterator_t *piterator = malloc(sizeof(fdb_files_iterator_t));
-    if (!piterator)
-    {
-        FS_ERR("Unable to allocate memory sync files iterator");
-        return 0;
-    }
-    memset(piterator, 0, sizeof *piterator);
-
-    piterator->transaction = transaction;
-    piterator->type = FDB_ITERATE_DIFF;
-    piterator->uuid = *uuid;
-
-    if (!fdb_cursor_open(&transaction->path_ids_map, transaction->transaction, &piterator->cursor))
+    if (!fdb_cursor_open(&files_map->path_ids_map, transaction, &piterator->cursor))
     {
         fdb_files_iterator_free(piterator);
         return 0;
@@ -483,157 +451,166 @@ void fdb_files_iterator_free(fdb_files_iterator_t *piterator)
 {
     if (piterator)
     {
+        fdb_files_release(piterator->files_map);
         fdb_cursor_close(&piterator->cursor);
         free(piterator);
     }
 }
 
-bool fdb_files_iterator_first(fdb_files_iterator_t *piterator, ffile_info_t *info, fdb_diff_kind_t *diff_kind)
+bool fdb_files_iterator_first(fdb_files_iterator_t *piterator, ffile_info_t *info)
 {
     if (!piterator || !info)
         return false;
 
-    bool ret = false;
+    fdb_data_t file_path = { 0 };
+    fdb_data_t file_id = { 0 };
 
-    switch(piterator->type)
-    {
-        case FDB_ITERATE_ALL:
-        {
-            fdb_data_t file_path = { 0 };
-            fdb_data_t file_id = { 0 };
-            return fdb_cursor_get(&piterator->cursor, &file_path, &file_id, FDB_FIRST)
-                    && fdb_file_get(piterator->transaction, *(uint32_t*)file_id.data, info);
-        }
-
-        //////////////////////////////////////////// TODO ////////////////////////////////////////////
-        case FDB_ITERATE_DIFF:
-        {
-            for(piterator->idx = 0; piterator->idx < sync.files_list_size; ++piterator->idx)
-            {
-                if (memcmp(&sync.files_list[piterator->idx]->uuid, &piterator->uuid0, sizeof piterator->uuid0) == 0)
-                {
-                    fdb_file_info_t key = { piterator->uuid1 };
-                    strncpy(key.info.path, sync.files_list[piterator->idx]->info.path, sizeof key.info.path);
-
-                    fdb_file_info_t const *pkey = &key;
-                    fdb_file_info_t **inf = (fdb_file_info_t **)bsearch(&pkey, sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
-
-                    if (!inf)
-                    {
-                        memcpy(info, &sync.files_list[piterator->idx]->info, sizeof *info);
-                        if (diff_kind)
-                            *diff_kind = FDB_FILE_ABSENT;
-                        ret = true;
-                        break;
-                    }
-/*
-                    else if (memcmp(&sync.files_list[piterator->idx]->info.digest, &(*inf)->info.digest, sizeof (*inf)->info.digest))
-                    {
-                        if (diff_kind)
-                            *diff_kind = FDB_DIFF_CONTENT;
-                        ret = true;
-                        break;
-                    }
-*/
-                }
-            }
-
-            break;
-        }
-    }
-
-    return ret;
+    return fdb_cursor_get(&piterator->cursor, &file_path, &file_id, FDB_FIRST)
+            && fdb_file_get(piterator->files_map, piterator->transaction, *(uint32_t*)file_id.data, info);
 }
 
-bool fdb_files_iterator_next(fdb_files_iterator_t *piterator, ffile_info_t *info, fdb_diff_kind_t *diff_kind)
+bool fdb_files_iterator_next(fdb_files_iterator_t *piterator, ffile_info_t *info)
 {
     if (!piterator || !info)
         return false;
 
-    bool ret = false;
+    fdb_data_t file_path = { 0 };
+    fdb_data_t file_id = { 0 };
 
-    if (piterator->idx >= sync.files_list_size)
+    return fdb_cursor_get(&piterator->cursor, &file_path, &file_id, FDB_NEXT)
+            && fdb_file_get(piterator->files_map, piterator->transaction, *(uint32_t*)file_id.data, info);
+}
+
+fdb_files_diff_iterator_t *fdb_files_diff_iterator(fdb_files_map_t *map_1, fdb_files_map_t *map_2, fdb_transaction_t *transaction)
+{
+    if (!transaction || !map_1 || !map_2)
+        return 0;
+
+    fdb_files_diff_iterator_t *piterator = malloc(sizeof(fdb_files_diff_iterator_t));
+    if (!piterator)
+    {
+        FS_ERR("Unable to allocate memory sync files iterator");
+        return 0;
+    }
+    memset(piterator, 0, sizeof *piterator);
+
+    piterator->transaction = transaction;
+    piterator->files_map_1 = fdb_files_retain(map_1);
+    piterator->files_map_2 = fdb_files_retain(map_2);
+
+    if (!fdb_cursor_open(&map_1->path_ids_map, transaction, &piterator->cursor))
+    {
+        fdb_files_diff_iterator_free(piterator);
+        return 0;
+    }
+
+    return piterator;
+}
+
+void fdb_files_diff_iterator_free(fdb_files_diff_iterator_t *piterator)
+{
+    if (piterator)
+    {
+        fdb_files_release(piterator->files_map_1);
+        fdb_files_release(piterator->files_map_2);
+        fdb_cursor_close(&piterator->cursor);
+        free(piterator);
+    }
+}
+
+bool fdb_files_diff_iterator_first(fdb_files_diff_iterator_t *piterator, ffile_info_t *info, fdb_diff_kind_t *diff_kind)
+{
+    if (!piterator || !info)
         return false;
 
-    fsdb_push_lock(sync.mutex);
+    fdb_data_t file_path_1 = { 0 };
+    fdb_data_t file_id_1 = { 0 };
 
-    switch(piterator->type)
+    bool first = true;
+
+    while (fdb_cursor_get(&piterator->cursor, &file_path_1, &file_id_1, first ? FDB_FIRST : FDB_NEXT))
     {
-        case FDB_ITERATE_ALL:
+        uint32_t id_2 = FINVALID_ID;
+
+        if (!fdb_file_id(piterator->files_map_2, piterator->transaction, (char const*)file_path_1.data, &id_2))
         {
-            piterator->idx++;
-            if (piterator->idx < sync.files_list_size)
+            if (!fdb_file_get(piterator->files_map_1, piterator->transaction, *(uint32_t*)file_id_1.data, info))
             {
-                memcpy(info, &sync.files_list[piterator->idx]->info, sizeof *info);
-                ret = true;
+                FS_ERR("DB consistency is broken");
+                return false;
             }
-            break;
+            if (diff_kind)
+                *diff_kind = FDB_FILE_ABSENT;
+            return true;
+        }
+        else
+        {
+            ffile_info_t info_2 = { 0 };
+
+            if (!fdb_file_get(piterator->files_map_2, piterator->transaction, id_2, &info_2)
+                || !fdb_file_get(piterator->files_map_1, piterator->transaction, *(uint32_t*)file_id_1.data, info))
+            {
+                FS_ERR("DB consistency is broken");
+                return false;
+            }
+            if (memcmp(&info->digest, &info_2.digest, sizeof info->digest) != 0)
+            {
+                if (diff_kind)
+                    *diff_kind = FDB_DIFF_CONTENT;
+                return true;
+            }
         }
 
-        case FDB_ITERATE_UUID:
+        first = false;
+    }
+
+    return false;
+
+}
+
+bool fdb_files_diff_iterator_next(fdb_files_diff_iterator_t *piterator, ffile_info_t *info, fdb_diff_kind_t *diff_kind)
+{
+    if (!piterator || !info)
+        return false;
+
+    fdb_data_t file_path_1 = { 0 };
+    fdb_data_t file_id_1 = { 0 };
+
+    while (fdb_cursor_get(&piterator->cursor, &file_path_1, &file_id_1, FDB_NEXT))
+    {
+        uint32_t id_2 = FINVALID_ID;
+
+        if (!fdb_file_id(piterator->files_map_2, piterator->transaction, (char const*)file_path_1.data, &id_2))
         {
-            for(piterator->idx++; piterator->idx < sync.files_list_size; ++piterator->idx)
+            if (!fdb_file_get(piterator->files_map_1, piterator->transaction, *(uint32_t*)file_id_1.data, info))
             {
-                if (memcmp(&sync.files_list[piterator->idx]->uuid, &piterator->uuid0, sizeof piterator->uuid0) == 0)
-                {
-                    memcpy(info, &sync.files_list[piterator->idx]->info, sizeof *info);
-                    ret = true;
-                    break;
-                }
+                FS_ERR("DB consistency is broken");
+                return false;
             }
-            break;
+            if (diff_kind)
+                *diff_kind = FDB_FILE_ABSENT;
+            return true;
         }
-
-        case FDB_ITERATE_DIFF:
+        else
         {
-            for(piterator->idx++; piterator->idx < sync.files_list_size; ++piterator->idx)
+            ffile_info_t info_2 = { 0 };
+
+            if (!fdb_file_get(piterator->files_map_2, piterator->transaction, id_2, &info_2)
+                || !fdb_file_get(piterator->files_map_1, piterator->transaction, *(uint32_t*)file_id_1.data, info))
             {
-                if (memcmp(&sync.files_list[piterator->idx]->uuid, &piterator->uuid0, sizeof piterator->uuid0) == 0)
-                {
-                    fdb_file_info_t key = { piterator->uuid1 };
-                    strncpy(key.info.path, sync.files_list[piterator->idx]->info.path, sizeof key.info.path);
-
-                    fdb_file_info_t const *pkey = &key;
-                    fdb_file_info_t **inf = (fdb_file_info_t **)bsearch(&pkey, sync.files_list, sync.files_list_size, sizeof(fdb_sync_files_t*), fscompare);
-
-                    if (!inf)
-                    {
-                        memcpy(info, &sync.files_list[piterator->idx]->info, sizeof *info);
-                        if (diff_kind)
-                            *diff_kind = FDB_FILE_ABSENT;
-                        ret = true;
-                        break;
-                    }
-                    else if (memcmp(&sync.files_list[piterator->idx]->info.digest, &(*inf)->info.digest, sizeof (*inf)->info.digest))
-                    {
-                        if (diff_kind)
-                            *diff_kind = FDB_DIFF_CONTENT;
-                        ret = true;
-                        break;
-                    }
-                }
+                FS_ERR("DB consistency is broken");
+                return false;
             }
-
-            break;
+            if (memcmp(&info->digest, &info_2.digest, sizeof info->digest) != 0)
+            {
+                if (diff_kind)
+                    *diff_kind = FDB_DIFF_CONTENT;
+                return true;
+            }
         }
     }
 
-    fsdb_pop_lock();
-
-    return ret;
-}
-
-bool fdb_files_iterator_uuid(fdb_files_iterator_t *piterator, ffile_info_t *uuid)
-{
-    if (!piterator || !uuid)
-        return false;
-
-    if (piterator->idx >= sync.files_list_size)
-        return false;
-
-    memcpy(uuid, &sync.files_list[piterator->idx]->uuid, sizeof *uuid);
-
-    return true;
+    return false;
 }
 
 uint32_t fdb_get_uuids(fuuid_t uuids[FMAX_CONNECTIONS_NUM])

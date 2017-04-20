@@ -86,12 +86,12 @@ struct fdb_files_map
 {
     volatile uint32_t   ref_counter;
     fdb_map_t           files_map;
-    fdb_map_t           ids_map;
     fdb_map_t           path_ids_map;
+    fdb_map_t           ids_map;
     fdb_map_t           status_map;
 };
 
-fdb_files_map_t *fdb_files_open(fdb_transaction_t *transaction, fuuid_t const *uuid)
+fdb_files_map_t *fdb_files_open_ex(fdb_transaction_t *transaction, fuuid_t const *uuid, bool ids_generator, bool statuses_indexation)
 {
     if (!transaction || !uuid)
     {
@@ -122,18 +122,6 @@ fdb_files_map_t *fdb_files_open(fdb_transaction_t *transaction, fuuid_t const *u
         return 0;
     }
 
-    // ids
-    char ids_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILE_ID] = { 0 };
-    fdb_tbl_name(uuid, ids_tbl_name, sizeof ids_tbl_name, TBL_FILE_ID);
-
-    if (!fdb_ids_map_open(transaction, ids_tbl_name, &files_map->ids_map))
-    {
-        FS_ERR("Map wasn't created");
-        fdb_transaction_abort(transaction);
-        fdb_files_release(files_map);
-        return 0;
-    }
-
     // path->id
     char path_ids_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILE_PATH_ID] = { 0 };
     fdb_tbl_name(uuid, path_ids_tbl_name, sizeof path_ids_tbl_name, TBL_FILE_PATH_ID);
@@ -146,19 +134,42 @@ fdb_files_map_t *fdb_files_open(fdb_transaction_t *transaction, fuuid_t const *u
         return 0;
     }
 
-    // status->id
-    char file_status_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILE_STATUS] = { 0 };
-    fdb_tbl_name(uuid, file_status_tbl_name, sizeof file_status_tbl_name, TBL_FILE_STATUS);
-
-    if (!fdb_statuses_map_open(transaction, file_status_tbl_name, &files_map->status_map))
+    // ids
+    if (ids_generator)
     {
-        FS_ERR("Map wasn't created");
-        fdb_transaction_abort(transaction);
-        fdb_files_release(files_map);
-        return 0;
+        char ids_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILE_ID] = { 0 };
+        fdb_tbl_name(uuid, ids_tbl_name, sizeof ids_tbl_name, TBL_FILE_ID);
+
+        if (!fdb_ids_map_open(transaction, ids_tbl_name, &files_map->ids_map))
+        {
+            FS_ERR("Map wasn't created");
+            fdb_transaction_abort(transaction);
+            fdb_files_release(files_map);
+            return 0;
+        }
+    }
+
+    // status->id
+    if (statuses_indexation)
+    {
+        char file_status_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILE_STATUS] = { 0 };
+        fdb_tbl_name(uuid, file_status_tbl_name, sizeof file_status_tbl_name, TBL_FILE_STATUS);
+
+        if (!fdb_statuses_map_open(transaction, file_status_tbl_name, &files_map->status_map))
+        {
+            FS_ERR("Map wasn't created");
+            fdb_transaction_abort(transaction);
+            fdb_files_release(files_map);
+            return 0;
+        }
     }
 
     return files_map;
+}
+
+fdb_files_map_t *fdb_files_open(fdb_transaction_t *transaction, fuuid_t const *uuid)
+{
+    return fdb_files_open_ex(transaction, uuid, true, true);
 }
 
 fdb_files_map_t *fdb_files_retain(fdb_files_map_t *files_map)
@@ -255,7 +266,7 @@ bool fdb_file_add(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ff
 
     ffile_info_t old_info = { 0 };
 
-    if (!fdb_file_get_by_path(files_map, transaction, info->path, &old_info))
+    if (!fdb_file_get_by_path(files_map, transaction, info->path, strlen(info->path), &old_info))
     {
         if (info->id == FINVALID_ID
             && !fdb_id_generate(&files_map->ids_map, transaction, &info->id))
@@ -292,7 +303,7 @@ bool fdb_file_add_unique(fdb_files_map_t *files_map, fdb_transaction_t *transact
 
     uint32_t id = FINVALID_ID;
 
-    if (!fdb_file_id(files_map, transaction, info->path, &id))
+    if (!fdb_file_id(files_map, transaction, info->path, strlen(info->path), &id))
     {
         if (!fdb_id_generate(&files_map->ids_map, transaction, &info->id))
             return false;
@@ -351,11 +362,11 @@ bool fdb_file_get(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ui
             && fdb_file_info_unmarshal(info, file_info.data);
 }
 
-bool fdb_file_id(fdb_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, uint32_t *id)
+bool fdb_file_id(fdb_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, size_t const size, uint32_t *id)
 {
     if (!transaction || !path || !id)
         return false;
-    fdb_data_t const file_path = { strlen(path), (void*)path };
+    fdb_data_t const file_path = { size, (void*)path };
     fdb_data_t file_id = { 0 };
     if (fdb_map_get(&files_map->path_ids_map, transaction, &file_path, &file_id))
     {
@@ -378,10 +389,10 @@ bool fdb_file_get_by_status(fdb_files_map_t *files_map, fdb_transaction_t *trans
             && fdb_file_get(files_map, transaction, *(uint32_t*)file_id.data, info);
 }
 
-bool fdb_file_get_by_path(fdb_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, ffile_info_t *info)
+bool fdb_file_get_by_path(fdb_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, size_t const size, ffile_info_t *info)
 {
     uint32_t id = FINVALID_ID;
-    return fdb_file_id(files_map, transaction, path, &id)
+    return fdb_file_id(files_map, transaction, path, size, &id)
             && fdb_file_get(files_map, transaction, id, info);
 }
 
@@ -532,7 +543,7 @@ bool fdb_files_diff_iterator_first(fdb_files_diff_iterator_t *piterator, ffile_i
     {
         uint32_t id_2 = FINVALID_ID;
 
-        if (!fdb_file_id(piterator->files_map_2, piterator->transaction, (char const*)file_path_1.data, &id_2))
+        if (!fdb_file_id(piterator->files_map_2, piterator->transaction, (char const*)file_path_1.data, file_path_1.size, &id_2))
         {
             if (!fdb_file_get(piterator->files_map_1, piterator->transaction, *(uint32_t*)file_id_1.data, info))
             {
@@ -580,7 +591,7 @@ bool fdb_files_diff_iterator_next(fdb_files_diff_iterator_t *piterator, ffile_in
     {
         uint32_t id_2 = FINVALID_ID;
 
-        if (!fdb_file_id(piterator->files_map_2, piterator->transaction, (char const*)file_path_1.data, &id_2))
+        if (!fdb_file_id(piterator->files_map_2, piterator->transaction, (char const*)file_path_1.data, file_path_1.size, &id_2))
         {
             if (!fdb_file_get(piterator->files_map_1, piterator->transaction, *(uint32_t*)file_id_1.data, info))
             {

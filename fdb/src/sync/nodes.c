@@ -1,4 +1,5 @@
 #include "nodes.h"
+#include <futils/log.h>
 #include <binn.h>
 #include <string.h>
 #include <stdlib.h>
@@ -24,63 +25,123 @@ static bool fdb_node_unmarshal(fdb_node_info_t *info, void const *data)
     return true;
 }
 
-bool fdb_node_add(fdb_t *pdb, fuuid_t const *uuid, fdb_node_info_t const *info)
+struct fdb_nodes
 {
-    if (!pdb || !uuid || !info)
-        return false;
+    volatile uint32_t   ref_counter;
+    fdb_map_t           nodes_map;
+};
 
-    bool ret = false;
-
-    fdb_transaction_t transaction = { 0 };
-    if (fdb_transaction_start(pdb, &transaction))
+fdb_nodes_t *fdb_nodes(fdb_transaction_t *transaction)
+{
+    if (!transaction)
     {
-        fdb_map_t map = {0};
-        if (fdb_map_open(&transaction, TBL_NODES, FDB_MAP_CREATE, &map))
-        {
-            binn *obj = fdb_node_marshal(info);
-
-            fdb_data_t const key = { sizeof *uuid, (void*)uuid };
-            fdb_data_t const value = { binn_size(obj), binn_ptr(obj) };
-            ret = fdb_map_put(&map, &transaction, &key, &value);
-
-            fdb_transaction_commit(&transaction);
-            fdb_map_close(&map);
-            binn_free(obj);
-        }
+        FS_ERR("Invalid arguments");
+        return 0;
     }
 
+    fdb_nodes_t *nodes = malloc(sizeof(fdb_nodes_t));
+    if (!nodes)
+    {
+        FS_ERR("No free space of memory");
+        return 0;
+    }
+
+    memset(nodes, 0, sizeof *nodes);
+
+    nodes->ref_counter = 1;
+
+    if (!fdb_map_open(transaction, TBL_NODES, FDB_MAP_CREATE, &nodes->nodes_map))
+    {
+        fdb_nodes_release(nodes);
+        return 0;
+    }
+
+    return nodes;
+}
+
+fdb_nodes_t *fdb_nodes_retain(fdb_nodes_t *nodes)
+{
+    if (nodes)
+        nodes->ref_counter++;
+    else
+        FS_ERR("Invalid map");
+    return nodes;
+}
+
+void fdb_nodes_release(fdb_nodes_t *nodes)
+{
+    if (nodes)
+    {
+        if (!nodes->ref_counter)
+            FS_ERR("Invalid map");
+        else if (!--nodes->ref_counter)
+        {
+            fdb_map_close(&nodes->nodes_map);
+            free(nodes);
+        }
+    }
+    else
+        FS_ERR("Invalid files map");
+}
+
+bool fdb_node_add(fdb_nodes_t *nodes, fdb_transaction_t *transaction, fuuid_t const *uuid, fdb_node_info_t const *info)
+{
+    if (!transaction || !transaction || !uuid || !info)
+        return false;
+
+    binn *obj = fdb_node_marshal(info);
+
+    fdb_data_t const key = { sizeof *uuid, (void*)uuid };
+    fdb_data_t const value = { binn_size(obj), binn_ptr(obj) };
+    bool ret = fdb_map_put(&nodes->nodes_map, transaction, &key, &value);
+    binn_free(obj);
     return ret;
 }
 
 struct fdb_nodes_iterator
 {
-    fdb_transaction_t transaction;
-    fdb_map_t map;
+    fdb_nodes_t *nodes;
     fdb_cursor_t cursor;
 };
 
-bool fdb_nodes_iterator(fdb_t *pdb, fdb_nodes_iterator_t **pit)
+fdb_nodes_iterator_t *fdb_nodes_iterator(fdb_nodes_t *nodes, fdb_transaction_t *transaction)
 {
-    if (!pdb || !pit)
+    if (!nodes || !transaction)
         return false;
-    fdb_nodes_iterator_t *it = *pit = malloc(sizeof(fdb_nodes_iterator_t));
+    fdb_nodes_iterator_t *it = malloc(sizeof(fdb_nodes_iterator_t));
     if (!it)
         return false;
     memset(it, 0, sizeof(fdb_nodes_iterator_t));
-    return fdb_transaction_start(pdb, &it->transaction)
-           && fdb_map_open(&it->transaction, TBL_NODES, FDB_MAP_CREATE, &it->map)
-           && fdb_cursor_open(&it->map, &it->transaction, &it->cursor);
+    it->nodes = fdb_nodes_retain(nodes);
+    if (!fdb_cursor_open(&nodes->nodes_map, transaction, &it->cursor))
+    {
+        fdb_nodes_iterator_free(it);
+        it = 0;
+    }
+    return it;
 }
 
-void fdb_nodes_iterator_delete(fdb_nodes_iterator_t *it)
+void fdb_nodes_iterator_free(fdb_nodes_iterator_t *it)
 {
     if (it)
     {
+        fdb_nodes_release(it->nodes);
         fdb_cursor_close(&it->cursor);
-        fdb_transaction_abort(&it->transaction);
-        fdb_map_close(&it->map);
         free(it);
     }
+}
+
+bool fdb_nodes_first(fdb_nodes_iterator_t *it, fuuid_t *uuid, fdb_node_info_t *info)
+{
+    if (!it || !uuid || !info)
+        return false;
+    fdb_data_t key = { 0 };
+    fdb_data_t value = { 0 };
+    bool ret = fdb_cursor_get(&it->cursor, &key, &value, FDB_FIRST);
+    if (!ret)
+        return false;
+    memcpy(uuid, key.data, key.size);
+    return fdb_node_unmarshal(info, value.data);
 }
 
 bool fdb_nodes_next(fdb_nodes_iterator_t *it, fuuid_t *uuid, fdb_node_info_t *info)

@@ -19,8 +19,9 @@ void    fcore_stop(fcore_t *pcore);
 bool    fcore_connect(fcore_t *pcore, char const *addr);
 bool    fcore_sync(fcore_t *pcore, char const *dir);
 
-bool    fcore_nodes_iterator(fcore_t *pcore, fcore_nodes_iterator_t **it);
-void    fcore_nodes_iterator_delete(fcore_nodes_iterator_t *it);
-bool    fcore_nodes_next(fcore_nodes_iterator_t *it, fcore_node_info_t *info);
+fcore_nodes_iterator_t *fcore_nodes_iterator(fcore_t *pcore);
+void                    fcore_nodes_iterator_free(fcore_nodes_iterator_t *it);
+bool                    fcore_nodes_first(fcore_nodes_iterator_t *it, fcore_node_info_t *info);
+bool                    fcore_nodes_next(fcore_nodes_iterator_t *it, fcore_node_info_t *info);
 
 #endif

@@ -88,10 +88,9 @@ struct fdb_files_map
     fdb_map_t           files_map;
     fdb_map_t           path_ids_map;
     fdb_map_t           ids_map;
-    fdb_map_t           status_map;
 };
 
-fdb_files_map_t *fdb_files_open_ex(fdb_transaction_t *transaction, fuuid_t const *uuid, bool ids_generator, bool statuses_indexation)
+fdb_files_map_t *fdb_files_ex(fdb_transaction_t *transaction, fuuid_t const *uuid, bool ids_generator)
 {
     if (!transaction || !uuid)
     {
@@ -149,27 +148,12 @@ fdb_files_map_t *fdb_files_open_ex(fdb_transaction_t *transaction, fuuid_t const
         }
     }
 
-    // status->id
-    if (statuses_indexation)
-    {
-        char file_status_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILE_STATUS] = { 0 };
-        fdb_tbl_name(uuid, file_status_tbl_name, sizeof file_status_tbl_name, TBL_FILE_STATUS);
-
-        if (!fdb_statuses_map_open(transaction, file_status_tbl_name, &files_map->status_map))
-        {
-            FS_ERR("Map wasn't created");
-            fdb_transaction_abort(transaction);
-            fdb_files_release(files_map);
-            return 0;
-        }
-    }
-
     return files_map;
 }
 
-fdb_files_map_t *fdb_files_open(fdb_transaction_t *transaction, fuuid_t const *uuid)
+fdb_files_map_t *fdb_files(fdb_transaction_t *transaction, fuuid_t const *uuid)
 {
-    return fdb_files_open_ex(transaction, uuid, true, true);
+    return fdb_files_ex(transaction, uuid, true);
 }
 
 fdb_files_map_t *fdb_files_retain(fdb_files_map_t *files_map)
@@ -192,12 +176,25 @@ void fdb_files_release(fdb_files_map_t *files_map)
             fdb_map_close(&files_map->files_map);
             fdb_map_close(&files_map->ids_map);
             fdb_map_close(&files_map->path_ids_map);
-            fdb_map_close(&files_map->status_map);
             free(files_map);
         }
     }
     else
         FS_ERR("Invalid files map");
+}
+
+bool fdb_files_statuses(fdb_transaction_t *transaction, fuuid_t const *uuid, fdb_map_t *pmap)
+{
+    if (!transaction || !uuid || !pmap)
+    {
+        FS_ERR("Invalid arguments");
+        return false;
+    }
+
+    char file_status_tbl_name[sizeof(fuuid_t) * 2 + sizeof TBL_FILE_STATUS] = { 0 };
+    fdb_tbl_name(uuid, file_status_tbl_name, sizeof file_status_tbl_name, TBL_FILE_STATUS);
+
+    return fdb_statuses_map_open(transaction, file_status_tbl_name, pmap);
 }
 
 static char STR_PATH[] = "path";
@@ -286,11 +283,6 @@ bool fdb_file_add(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ff
     bool ret = fdb_map_put(&files_map->files_map, transaction, &file_id, &file_info)
                 && fdb_map_put(&files_map->path_ids_map, transaction, &file_path, &file_id);
 
-    if ((info->status & FFILE_IS_EXIST) == 0)
-        ret &= fdb_statuses_map_put(&files_map->status_map, transaction, FFILE_IS_EXIST, &file_id);
-    else
-        fdb_statuses_map_del(&files_map->status_map, transaction, FFILE_IS_EXIST, &file_id);
-
     binn_free(binfo);
 
     return ret;
@@ -319,9 +311,6 @@ bool fdb_file_add_unique(fdb_files_map_t *files_map, fdb_transaction_t *transact
         bool ret = fdb_map_put(&files_map->files_map, transaction, &file_id, &file_info)
                     && fdb_map_put(&files_map->path_ids_map, transaction, &file_path, &file_id);
 
-        if ((info->status & FFILE_IS_EXIST) == 0)
-            ret &= fdb_statuses_map_put(&files_map->status_map, transaction, FFILE_IS_EXIST, &file_id);
-
         binn_free(binfo);
 
         return ret;
@@ -340,9 +329,6 @@ bool fdb_file_del(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ui
     {
         fdb_data_t const file_id = { sizeof id, &id };
         fdb_data_t const file_path = { strlen(info.path), info.path };
-
-        if ((info.status & FFILE_IS_EXIST) == 0)
-            fdb_statuses_map_del(&files_map->status_map, transaction, FFILE_IS_EXIST, &file_id);
 
         return fdb_map_del(&files_map->files_map, transaction, &file_id, 0)
                 && fdb_map_del(&files_map->path_ids_map, transaction, &file_path, 0)
@@ -374,19 +360,6 @@ bool fdb_file_id(fdb_files_map_t *files_map, fdb_transaction_t *transaction, cha
         return true;
     }
     return false;
-}
-
-bool fdb_file_get_by_status(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ffile_status_t status, ffile_info_t *info)
-{
-    if (!transaction || !info)
-        return false;
-
-    uint32_t st = status;
-    fdb_data_t const file_status = { sizeof st, &st };
-    fdb_data_t file_id = { 0 };
-
-    return fdb_map_get(&files_map->status_map, transaction, &file_status, &file_id)
-            && fdb_file_get(files_map, transaction, *(uint32_t*)file_id.data, info);
 }
 
 bool fdb_file_get_by_path(fdb_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, size_t const size, ffile_info_t *info)

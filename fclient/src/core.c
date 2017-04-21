@@ -119,7 +119,18 @@ bool fcore_connect(fcore_t *pcore, char const *addr)
     {
         fdb_node_info_t node_info;
         strncpy(node_info.address, addr, sizeof node_info.address);
-        fdb_node_add(pcore->db, &peer_uuid, &node_info);
+
+        fdb_transaction_t transaction = { 0 };
+        if (fdb_transaction_start(pcore->db, &transaction))
+        {
+            fdb_nodes_t *nodes = fdb_nodes(&transaction);
+            if (nodes)
+            {
+                fdb_node_add(nodes, &transaction, &peer_uuid, &node_info);
+                fdb_transaction_commit(&transaction);
+            }
+            fdb_transaction_abort(&transaction);
+        }
         return true;
     }
 
@@ -145,33 +156,75 @@ bool fcore_sync(fcore_t *pcore, char const *dir)
 struct fcore_nodes_iterator
 {
     filink_t             *ilink;
+    fdb_transaction_t     transaction;
     fdb_nodes_iterator_t *nodes_iterator;
 };
 
-bool fcore_nodes_iterator(fcore_t *pcore, fcore_nodes_iterator_t **pit)
+fcore_nodes_iterator_t *fcore_nodes_iterator(fcore_t *pcore)
 {
-    if (!pcore || !pit)
+    if (!pcore)
     {
         FS_ERR("Invalid argument");
         return false;
     }
 
-    fcore_nodes_iterator_t *it = *pit = malloc(sizeof(fcore_nodes_iterator_t));
+    fcore_nodes_iterator_t *it = malloc(sizeof(fcore_nodes_iterator_t));
     if (!it)
         return false;
     memset(it, 0, sizeof(fcore_nodes_iterator_t));
     it->ilink = filink_retain(pcore->ilink);
-    return fdb_nodes_iterator(pcore->db, &it->nodes_iterator);
+
+    if (!fdb_transaction_start(pcore->db, &it->transaction))
+    {
+        fcore_nodes_iterator_free(it);
+        return 0;
+    }
+
+    fdb_nodes_t *nodes = fdb_nodes(&it->transaction);
+    if (!nodes)
+    {
+        fcore_nodes_iterator_free(it);
+        return 0;
+    }
+
+    it->nodes_iterator = fdb_nodes_iterator(nodes, &it->transaction);
+    fdb_nodes_release(nodes);
+
+    if (!it->nodes_iterator)
+    {
+        fcore_nodes_iterator_free(it);
+        return 0;
+    }
+
+    return it;
 }
 
-void fcore_nodes_iterator_delete(fcore_nodes_iterator_t *it)
+void fcore_nodes_iterator_free(fcore_nodes_iterator_t *it)
 {
     if (it)
     {
         filink_release(it->ilink);
-        fdb_nodes_iterator_delete(it->nodes_iterator);
+        fdb_transaction_abort(&it->transaction);
+        fdb_nodes_iterator_free(it->nodes_iterator);
         free(it);
     }
+}
+
+bool fcore_nodes_first(fcore_nodes_iterator_t *it, fcore_node_info_t *info)
+{
+    if (!it || !info)
+        return false;
+
+    fdb_node_info_t node_info = { 0 };
+    bool ret = fdb_nodes_first(it->nodes_iterator, &info->uuid, &node_info);
+    if (ret)
+    {
+        strncpy(info->address, node_info.address, sizeof info->address);
+        info->connected = filink_is_connected(it->ilink, &info->uuid);
+        return true;
+    }
+
+    return false;
 }
 
 bool fcore_nodes_next(fcore_nodes_iterator_t *it, fcore_node_info_t *info)

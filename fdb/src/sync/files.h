@@ -28,20 +28,22 @@ typedef struct fdb_files_iterator fdb_files_iterator_t;
 typedef struct fdb_files_diff_iterator fdb_files_diff_iterator_t;
 typedef struct fdb_files_map fdb_files_map_t;
 
-fdb_files_map_t *fdb_files_open(fdb_transaction_t *transaction, fuuid_t const *uuid);
-fdb_files_map_t *fdb_files_open_ex(fdb_transaction_t *transaction, fuuid_t const *uuid, bool ids_generator, bool statuses_indexation);
+fdb_files_map_t *fdb_files(fdb_transaction_t *transaction, fuuid_t const *uuid);
+fdb_files_map_t *fdb_files_ex(fdb_transaction_t *transaction, fuuid_t const *uuid, bool ids_generator);
 fdb_files_map_t *fdb_files_retain(fdb_files_map_t *files_map);
 void fdb_files_release(fdb_files_map_t *files_map);
+
+bool fdb_files_statuses(fdb_transaction_t *transaction, fuuid_t const *uuid, fdb_map_t *pmap);
 
 bool fdb_file_add(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ffile_info_t *info);
 bool fdb_file_add_unique(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ffile_info_t *info);
 bool fdb_file_del(fdb_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id);
 bool fdb_file_get(fdb_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id, ffile_info_t *info);
 bool fdb_file_id(fdb_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, size_t const size, uint32_t *id);
-bool fdb_file_get_by_status(fdb_files_map_t *files_map, fdb_transaction_t *transaction, ffile_status_t status, ffile_info_t *info);
 bool fdb_file_get_by_path(fdb_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, size_t const size, ffile_info_t *info);
 bool fdb_file_del_all(fuuid_t const *uuid);
 bool fdb_file_path(fdb_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id, char *path, size_t size);
+
 bool fdb_sync_start(uint32_t id, uint32_t threshold_delta_time, uint32_t requested_parts_threshold, uint64_t size);
 bool fdb_sync_next_part(uint32_t id, uint32_t *part, bool *completed);
 void fdb_sync_part_received(fuuid_t const *uuid, uint32_t id, uint32_t part);

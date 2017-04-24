@@ -5,13 +5,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef void               (*fnet_disconnect_t)   (void *);
-typedef void               (*fnet_unbind_t)       (void *);
-typedef fnet_tcp_client_t* (*fnet_get_transport_t)(void *);
-typedef bool               (*fnet_send_t)         (void *, const void *, size_t);
-typedef bool               (*fnet_recv_t)         (void *, void *, size_t);
-typedef bool               (*fnet_acquire_t)      (void *);
-typedef void               (*fnet_release_t)      (void *);
+typedef void                  (*fnet_disconnect_t)   (void *);
+typedef void                  (*fnet_unbind_t)       (void *);
+typedef fnet_tcp_client_t*    (*fnet_get_transport_t)(void *);
+typedef bool                  (*fnet_send_t)         (void *, const void *, size_t);
+typedef bool                  (*fnet_recv_t)         (void *, void *, size_t);
+typedef bool                  (*fnet_acquire_t)      (void *);
+typedef void                  (*fnet_release_t)      (void *);
+typedef bool                  (*fnet_port_t)         (void const *, unsigned short *);
+typedef fnet_address_t const* (*fnet_peer_address_t) (void const *);
 
 struct fnet_client
 {
@@ -23,6 +25,7 @@ struct fnet_client
     fnet_recv_t          recv;
     fnet_acquire_t       acquire;
     fnet_release_t       release;
+    fnet_peer_address_t  peer_address;
 };
 
 struct fnet_server
@@ -30,6 +33,7 @@ struct fnet_server
     fnet_accepter_t   accepter;
     void             *pimpl;
     fnet_unbind_t     unbind;
+    fnet_port_t       port;
     void             *param;
 };
 
@@ -66,6 +70,7 @@ fnet_client_t *fnet_connect(fnet_transport_t transport, char const *addr)
             pclient->recv = (fnet_recv_t)fnet_tcp_recv;
             pclient->acquire = (fnet_acquire_t)fnet_tcp_acquire;
             pclient->release = (fnet_release_t)fnet_tcp_release;
+            pclient->peer_address = (fnet_peer_address_t)fnet_tcp_peer_address;
             break;
         }
 
@@ -84,6 +89,7 @@ fnet_client_t *fnet_connect(fnet_transport_t transport, char const *addr)
             pclient->recv = (fnet_recv_t)fnet_ssl_recv;
             pclient->acquire = (fnet_acquire_t)fnet_ssl_acquire;
             pclient->release = (fnet_release_t)fnet_ssl_release;
+            pclient->peer_address = (fnet_peer_address_t)fnet_ssl_peer_address;
             break;
         }
 
@@ -128,6 +134,7 @@ static void fnet_tcp_accepter(fnet_tcp_server_t const *tcp_server, fnet_tcp_clie
         pclient->recv = (fnet_recv_t)fnet_tcp_recv;
         pclient->acquire = (fnet_acquire_t)fnet_tcp_acquire;
         pclient->release = (fnet_release_t)fnet_tcp_release;
+        pclient->peer_address = (fnet_peer_address_t)fnet_tcp_peer_address;
 
         fnet_server_t *pserver = (fnet_server_t*)fnet_tcp_server_get_param(tcp_server);
         pserver->accepter(pserver, pclient);
@@ -153,6 +160,7 @@ static void fnet_ssl_accepter(fnet_ssl_server_t const *ssl_server, fnet_ssl_clie
         pclient->recv = (fnet_recv_t)fnet_ssl_recv;
         pclient->acquire = (fnet_acquire_t)fnet_ssl_acquire;
         pclient->release = (fnet_release_t)fnet_ssl_release;
+        pclient->peer_address = (fnet_peer_address_t)fnet_ssl_peer_address;
 
         fnet_server_t *pserver = (fnet_server_t*)fnet_ssl_server_get_param(ssl_server);
         pserver->accepter(pserver, pclient);
@@ -191,6 +199,8 @@ fnet_server_t *fnet_bind(fnet_transport_t transport, char const *addr, fnet_acce
             fnet_tcp_server_set_param(pserver->pimpl, pserver);
 
             pserver->unbind = (fnet_unbind_t)fnet_tcp_unbind;
+            pserver->port = (fnet_port_t)fnet_tcp_server_get_port;
+
             break;
         }
 
@@ -206,6 +216,8 @@ fnet_server_t *fnet_bind(fnet_transport_t transport, char const *addr, fnet_acce
             fnet_ssl_server_set_param(pserver->pimpl, pserver);
 
             pserver->unbind = (fnet_unbind_t)fnet_ssl_unbind;
+            pserver->port = (fnet_port_t)fnet_ssl_server_get_port;
+
             break;
         }
 
@@ -239,6 +251,17 @@ void fnet_server_set_param(fnet_server_t *pserver, void *param)
 void *fnet_server_get_param(fnet_server_t const *pserver)
 {
     return pserver->param;
+}
+
+bool fnet_server_get_port(fnet_server_t const *pserver, unsigned short *port)
+{
+    if (pserver)
+    {
+        if (pserver->port)
+            return pserver->port(pserver->pimpl, port);
+    }
+    else FS_ERR("Invalid argument");
+    return false;
 }
 
 fnet_wait_handler_t fnet_wait_handler()
@@ -324,4 +347,9 @@ bool fnet_acquire(fnet_client_t *client)
 void fnet_release(fnet_client_t *client)
 {
     client->release(client->pimpl);
+}
+
+fnet_address_t const *fnet_peer_address(fnet_client_t const *client)
+{
+    return client->peer_address(client->pimpl);
 }

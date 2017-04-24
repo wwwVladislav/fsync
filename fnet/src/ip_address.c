@@ -1,6 +1,7 @@
 #include "ip_address.h"
 #include <futils/log.h>
 #include <string.h>
+#include <stdio.h>
 
 bool fnet_str2addr(char const *str, fnet_address_t *addr)
 {
@@ -55,4 +56,22 @@ bool fnet_str2addr(char const *str, fnet_address_t *addr)
     freeaddrinfo(result);
 
     return ret;
+}
+
+bool fnet_addr2str(fnet_address_t const *addr, char *str, unsigned len)
+{
+    if (!str || !addr || !len)
+    {
+        FS_ERR("Invalid argument");
+        return false;
+    }
+
+    if (getnameinfo((struct sockaddr const *)addr, sizeof *addr, str, len, 0, 0, NI_NUMERICHOST | NI_NUMERICSERV) != 0)
+        return false;
+
+    unsigned addr_len = strlen(str);
+    if (addr_len < len)
+        snprintf(str + addr_len, len - addr_len, ":%u", ntohs(((struct sockaddr_in const *)addr)->sin_port));
+
+    return true;
 }

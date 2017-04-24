@@ -345,6 +345,17 @@ void *fnet_ssl_server_get_param(fnet_ssl_server_t const *pserver)
     return pserver->param;
 }
 
+bool fnet_ssl_server_get_port(fnet_ssl_server_t const *pserver, unsigned short *port)
+{
+    if (pserver)
+    {
+        if (pserver->tcp_server)
+            return fnet_tcp_server_get_port(pserver->tcp_server, port);
+    }
+    else FS_ERR("Invalid argument");
+    return false;
+}
+
 fnet_tcp_client_t *fnet_ssl_get_transport(fnet_ssl_client_t *pclient)
 {
     if (pclient)    return pclient->tcp_client;
@@ -399,4 +410,9 @@ void fnet_ssl_release(fnet_ssl_client_t *client)
 {
     (void)client;
     pthread_mutex_unlock(&client->mutex);
+}
+
+fnet_address_t const *fnet_ssl_peer_address(fnet_ssl_client_t const *client)
+{
+    return fnet_tcp_peer_address(client->tcp_client);
 }

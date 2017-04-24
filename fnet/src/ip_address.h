@@ -15,5 +15,6 @@
 typedef struct sockaddr_storage fnet_address_t;
 
 bool fnet_str2addr(char const *str, fnet_address_t *addr);
+bool fnet_addr2str(fnet_address_t const *addr, char *str, unsigned len);
 
 #endif

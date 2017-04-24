@@ -74,7 +74,7 @@ fcore_t *fcore_start(char const *addr)
         return 0;
     }
 
-    pcore->ilink = filink_bind(pcore->msgbus, pcore->config.address, &pcore->config.uuid);
+    pcore->ilink = filink_bind(pcore->msgbus, pcore->db, pcore->config.address, &pcore->config.uuid);
     if (!pcore->ilink)
     {
         fcore_stop(pcore);
@@ -114,27 +114,7 @@ bool fcore_connect(fcore_t *pcore, char const *addr)
         return false;
     }
 
-    fuuid_t peer_uuid = { 0 };
-    if (filink_connect(pcore->ilink, addr, &peer_uuid))
-    {
-        fdb_node_info_t node_info;
-        strncpy(node_info.address, addr, sizeof node_info.address);
-
-        fdb_transaction_t transaction = { 0 };
-        if (fdb_transaction_start(pcore->db, &transaction))
-        {
-            fdb_nodes_t *nodes = fdb_nodes(&transaction);
-            if (nodes)
-            {
-                fdb_node_add(nodes, &transaction, &peer_uuid, &node_info);
-                fdb_transaction_commit(&transaction);
-            }
-            fdb_transaction_abort(&transaction);
-        }
-        return true;
-    }
-
-    return false;
+    return filink_connect(pcore->ilink, addr);
 }
 
 bool fcore_sync(fcore_t *pcore, char const *dir)

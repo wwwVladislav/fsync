@@ -21,6 +21,7 @@ set(FILINK_LIBS
 )
 
 include_directories(
+    ../fdb/include
     ../fnet/include
     ../futils/include
     ../fcommon/include
@@ -36,5 +37,5 @@ endif (WIN32)
 use_c99()
 
 add_library(filink SHARED ${FILINK_HEADERS} ${FILINK_SOURCES})
-add_dependencies(filink futils fnet)
-target_link_libraries(filink ${FILINK_LIBS})
+add_dependencies(filink futils fnet fdb)
+target_link_libraries(filink ${FILINK_LIBS} fdb)

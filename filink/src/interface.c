@@ -3,10 +3,12 @@
 #include <fnet/transport.h>
 #include <futils/log.h>
 #include <fcommon/messages.h>
+#include <fdb/sync/nodes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <stddef.h>
+#include <winsock2.h>
 
 typedef struct
 {
@@ -21,12 +23,14 @@ struct filink
     fuuid_t               uuid;
     pthread_t             thread;
     fnet_server_t        *server;
+    unsigned short        port;
     pthread_mutex_t       nodes_mutex;
     volatile size_t       nodes_num;
     node_t                nodes[FMAX_CONNECTIONS_NUM];
     fnet_wait_handler_t   wait_handler;
     fproto_msg_handlers_t proto_handlers;
     fmsgbus_t            *msgbus;
+    fdb_t                *db;
 };
 
 #define filink_push_lock(mutex)                     \
@@ -51,8 +55,33 @@ static uint32_t filink_status_from_proto(uint32_t status)
     return ret;
 }
 
-static bool filink_add_node(filink_t *ilink, fnet_client_t *pclient, fuuid_t const *uuid)
+static bool filink_add_node2db(filink_t *ilink, fnet_client_t *pclient, fuuid_t const *uuid, char const *addr)
 {
+    fdb_node_info_t node_info;
+    strncpy(node_info.address, addr, sizeof node_info.address);
+
+    fdb_transaction_t transaction = { 0 };
+    if (fdb_transaction_start(ilink->db, &transaction))
+    {
+        fdb_nodes_t *nodes = fdb_nodes(&transaction);
+        if (nodes)
+        {
+            fdb_node_add(nodes, &transaction, uuid, &node_info);
+            fdb_transaction_commit(&transaction);
+            fdb_nodes_release(nodes);
+            return true;
+        }
+        fdb_transaction_abort(&transaction);
+    }
+
+    return false;
+}
+
+static bool filink_add_node(filink_t *ilink, fnet_client_t *pclient, fuuid_t const *uuid, char const *addr)
+{
+    if (!filink_add_node2db(ilink, pclient, uuid, addr))
+        return false;
+
     bool ret = true;
 
     filink_push_lock(ilink->nodes_mutex);
@@ -278,10 +307,19 @@ static void filink_clients_accepter(fnet_server_t const *pserver, fnet_client_t 
 
     if (pclient)
     {
+        unsigned short listen_port = 0;
+        unsigned short peer_port = 0;
         fuuid_t peer_uuid;
-        if (fproto_client_handshake_response(pclient, &ilink->uuid, &peer_uuid))
+
+        if (fnet_server_get_port(pserver, &listen_port)
+            && fproto_client_handshake_response(pclient, listen_port, &ilink->uuid, &peer_port, &peer_uuid))
         {
-            if (!filink_add_node(ilink, pclient, &peer_uuid))
+            fnet_address_t addr = *fnet_peer_address(pclient);
+            ((struct sockaddr_in *)&addr)->sin_port = htons(peer_port);
+            char str_addr[256];
+
+            if (!fnet_addr2str(&addr, str_addr, sizeof str_addr)
+                || !filink_add_node(ilink, pclient, &peer_uuid, str_addr))
                 fnet_disconnect(pclient);
             else
                 FS_INFO("New connection accepted. UUID: %llx%llx", peer_uuid.data.u64[0], peer_uuid.data.u64[1]);
@@ -340,11 +378,17 @@ static void *filink_thread(void *param)
     return 0;
 }
 
-filink_t *filink_bind(fmsgbus_t *pmsgbus, char const *addr, fuuid_t const *uuid)
+filink_t *filink_bind(fmsgbus_t *pmsgbus, fdb_t *db, char const *addr, fuuid_t const *uuid)
 {
     if (!pmsgbus)
     {
         FS_ERR("Invalid messages bus");
+        return 0;
+    }
+
+    if (!db)
+    {
+        FS_ERR("Invalid DB");
         return 0;
     }
 
@@ -370,6 +414,7 @@ filink_t *filink_bind(fmsgbus_t *pmsgbus, char const *addr, fuuid_t const *uuid)
 
     ilink->ref_counter = 1;
     ilink->uuid = *uuid;
+    ilink->db = fdb_retain(db);
 
     filink_msgbus_retain(ilink, pmsgbus);
 
@@ -383,6 +428,12 @@ filink_t *filink_bind(fmsgbus_t *pmsgbus, char const *addr, fuuid_t const *uuid)
     if (!ilink->server)
     {
         FS_ERR("Unable to bind the interlink");
+        filink_release(ilink);
+        return 0;
+    }
+
+    if (!fnet_server_get_port(ilink->server, &ilink->port))
+    {
         filink_release(ilink);
         return 0;
     }
@@ -454,6 +505,7 @@ void filink_release(filink_t *ilink)
             filink_unbind(ilink);
             filink_disconnect_all(ilink);
             filink_msgbus_release(ilink);
+            fdb_release(ilink->db);
             free(ilink);
         }
     }
@@ -461,7 +513,7 @@ void filink_release(filink_t *ilink)
         FS_ERR("Invalid interlink");
 }
 
-bool filink_connect(filink_t *ilink, char const *addr, fuuid_t *peer_uuid)
+bool filink_connect(filink_t *ilink, char const *addr)
 {
     if (!ilink)
     {
@@ -469,7 +521,7 @@ bool filink_connect(filink_t *ilink, char const *addr, fuuid_t *peer_uuid)
         return false;
     }
 
-    if (!addr || !peer_uuid)
+    if (!addr)
     {
         FS_ERR("Invalid argument");
         return false;
@@ -484,13 +536,16 @@ bool filink_connect(filink_t *ilink, char const *addr, fuuid_t *peer_uuid)
     fnet_client_t *pclient = fnet_connect(FNET_SSL, addr);
     if (!pclient) return false;
 
-    if (!fproto_client_handshake_request(pclient, &ilink->uuid, peer_uuid))
+    fuuid_t peer_uuid = { 0 };
+    uint16_t peer_listen_port = 0;
+
+    if (!fproto_client_handshake_request(pclient, ilink->port, &ilink->uuid, &peer_listen_port, &peer_uuid))
     {
         fnet_disconnect(pclient);
         return false;
     }
 
-    return filink_add_node(ilink, pclient, peer_uuid);
+    return filink_add_node(ilink, pclient, &peer_uuid, addr);
 }
 
 bool filink_is_connected(filink_t *ilink, fuuid_t const *uuid)

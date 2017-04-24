@@ -1,6 +1,5 @@
 #include "tcp_transport.h"
 #include "socket.h"
-#include "ip_address.h"
 #include <futils/log.h>
 #include <pthread.h>
 #include <time.h>
@@ -17,6 +16,7 @@ struct fnet_tcp_server
 {
     volatile bool       is_active;
     fnet_socket_t       sock;
+    fnet_address_t      addr;
     pthread_t           thread;
     fnet_tcp_accepter_t accepter;
     void               *param;
@@ -169,15 +169,14 @@ fnet_tcp_server_t *fnet_tcp_bind(char const *addr, fnet_tcp_accepter_t accepter)
         return 0;
     }
 
-    fnet_address_t net_addr;
-    if (!fnet_str2addr(addr, &net_addr))
+    if (!fnet_str2addr(addr, &pserver->addr))
     {
         FS_ERR("Invalid address");
         fnet_tcp_unbind(pserver);
         return 0;
     }
 
-    pserver->sock = fnet_socket_bind(&net_addr);
+    pserver->sock = fnet_socket_bind(&pserver->addr);
     if (pserver->sock == FNET_INVALID_SOCKET)
     {
         fnet_tcp_unbind(pserver);
@@ -220,6 +219,17 @@ void fnet_tcp_server_set_param(fnet_tcp_server_t *pserver, void *param)
 void *fnet_tcp_server_get_param(fnet_tcp_server_t const *pserver)
 {
     return pserver->param;
+}
+
+bool fnet_tcp_server_get_port(fnet_tcp_server_t const *pserver, unsigned short *port)
+{
+    if (pserver)
+    {
+        const struct sockaddr_in *addr = (const struct sockaddr_in *)&pserver->addr;
+        *port = ntohs(addr->sin_port);
+        return true;
+    } else FS_ERR("Invalid argument");
+    return false;
 }
 
 fnet_tcp_client_t *fnet_tcp_get_transport(fnet_tcp_client_t *pclient)
@@ -316,4 +326,9 @@ bool fnet_tcp_acquire(fnet_tcp_client_t *client)
 void fnet_tcp_release(fnet_tcp_client_t *client)
 {
     (void)client;
+}
+
+fnet_address_t const *fnet_tcp_peer_address(fnet_tcp_client_t const *client)
+{
+    return &client->addr;
 }

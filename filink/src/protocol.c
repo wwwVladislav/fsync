@@ -32,9 +32,10 @@ typedef struct fproto_field_desc
 
 FPROTO_DESC_TABLE(FPROTO_HELLO)
 {
-    { FPROTO_FIELD_UUID,   sizeof(fuuid_t),  offsetof(fproto_hello_t, uuid),    1 },
-    { FPROTO_FIELD_UINT32, sizeof(uint32_t), offsetof(fproto_hello_t, version), 1 },
-    { FPROTO_FIELD_NULL,   0,                0,                                 0 }
+    { FPROTO_FIELD_UUID,   sizeof(fuuid_t),  offsetof(fproto_hello_t, uuid),        1 },
+    { FPROTO_FIELD_UINT32, sizeof(uint32_t), offsetof(fproto_hello_t, version),     1 },
+    { FPROTO_FIELD_UINT16, sizeof(uint16_t), offsetof(fproto_hello_t, listen_port), 1 },
+    { FPROTO_FIELD_NULL,   0,                0,                                     0 }
 };
 
 FPROTO_DESC_TABLE(FPROTO_NODE_STATUS)
@@ -402,7 +403,7 @@ static bool fproto_recv(fnet_client_t *client, fproto_msg_t msg, uint8_t *data)
     return fproto_unmarshal_struct(client, fproto_messages[msg], data) != 0;
 }
 
-bool fproto_client_handshake_request(fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid)
+bool fproto_client_handshake_request(fnet_client_t *client, uint16_t listen_port, fuuid_t const *uuid, uint16_t *peer_listen_port, fuuid_t *peer_uuid)
 {
     bool ret;
 
@@ -410,7 +411,8 @@ bool fproto_client_handshake_request(fnet_client_t *client, fuuid_t const *uuid,
     fproto_hello_t const req =
     {
         *uuid,
-        FPROTO_VERSION
+        FPROTO_VERSION,
+        listen_port
     };
 
     do
@@ -434,6 +436,7 @@ bool fproto_client_handshake_request(fnet_client_t *client, fuuid_t const *uuid,
         if (!fproto_recv(client, (fproto_msg_t)msg, (uint8_t *)&res)) break;
         if (res.version != FPROTO_VERSION) break;                   // Unsupported protocol version
         if (memcmp(&res.uuid, uuid, sizeof *uuid) == 0) break;      // Client and server are the same node
+        *peer_listen_port = res.listen_port;
         *peer_uuid = res.uuid;
         ret = true;
     } while(0);
@@ -441,7 +444,7 @@ bool fproto_client_handshake_request(fnet_client_t *client, fuuid_t const *uuid,
     return ret;
 }
 
-bool fproto_client_handshake_response(fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid)
+bool fproto_client_handshake_response(fnet_client_t *client, uint16_t listen_port, fuuid_t const *uuid, uint16_t *peer_listen_port, fuuid_t *peer_uuid)
 {
     bool ret;
 
@@ -458,6 +461,7 @@ bool fproto_client_handshake_response(fnet_client_t *client, fuuid_t const *uuid
         if (!fproto_recv(client, (fproto_msg_t)msg, (uint8_t *)&req)) break;
         if (req.version != FPROTO_VERSION) break;                   // Unsupported protocol version
         if (memcmp(&req.uuid, uuid, sizeof *uuid) == 0) break;      // Client and server are the same node
+        *peer_listen_port = req.listen_port;
         *peer_uuid = req.uuid;
         ret = true;
     } while(0);
@@ -468,7 +472,8 @@ bool fproto_client_handshake_response(fnet_client_t *client, fuuid_t const *uuid
     fproto_hello_t const res =
     {
         *uuid,
-        FPROTO_VERSION
+        FPROTO_VERSION,
+        listen_port
     };
 
     do

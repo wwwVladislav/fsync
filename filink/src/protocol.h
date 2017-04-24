@@ -26,6 +26,7 @@ typedef struct
 {
     fuuid_t  uuid;              // node uuid
     uint32_t version;           // protocol version
+    uint16_t listen_port;       // listen port
 } fproto_hello_t;
 
 // FPROTO_NODE_STATUS
@@ -98,8 +99,8 @@ typedef struct
     fproto_file_part_handler_t             file_part_handler;
 } fproto_msg_handlers_t;
 
-bool fproto_client_handshake_request (fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid);
-bool fproto_client_handshake_response(fnet_client_t *client, fuuid_t const *uuid, fuuid_t *peer_uuid);
+bool fproto_client_handshake_request (fnet_client_t *client, uint16_t listen_port, fuuid_t const *uuid, uint16_t *peer_listen_port, fuuid_t *peer_uuid);
+bool fproto_client_handshake_response(fnet_client_t *client, uint16_t listen_port, fuuid_t const *uuid, uint16_t *peer_listen_port, fuuid_t *peer_uuid);
 bool fproto_send                     (fnet_client_t *client, fproto_msg_t msg, uint8_t const *data);
 bool fproto_read_message             (fnet_client_t *client, fproto_msg_handlers_t *handlers);
 

@@ -462,6 +462,7 @@ static void *fsync_thread(void *param)
                         fdb_node_info_t node_info;
                         for (bool st = fdb_nodes_first(nodes_it, &uuid, &node_info); st; st = fdb_nodes_next(nodes_it, &uuid, &node_info))
                         {
+                            printf("ololo\n");
                             // TODO:
                         }
                         fdb_nodes_iterator_free(nodes_it);

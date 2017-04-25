@@ -10,10 +10,10 @@
 #include <pthread.h>
 #include <binn.h>
 
-static char const TBL_FILE_INFO[] = "/file.info";
-static char const TBL_FILE_ID[] = "/file.id";
-static char const TBL_FILE_PATH_ID[] = "/file.path.id";
-static char const TBL_FILE_STATUS[] = "/file.status";
+static char const TBL_FILE_INFO[] = "/finfo";
+static char const TBL_FILE_ID[] = "/fid";
+static char const TBL_FILE_PATH_ID[] = "/fpath.id";
+static char const TBL_FILE_STATUS[] = "/fstatus";
 
 static char const *fdb_tbl_name(fuuid_t const *uuid, char *buf, size_t size, char const *tbl)
 {

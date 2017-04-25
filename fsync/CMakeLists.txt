@@ -5,11 +5,13 @@ set(FSYNC_HEADERS
     src/device.h
     src/fsutils.h
     src/sync.h
+    src/synchronizer.h
 )
 
 set(FSYNC_SOURCES
     src/fsutils.c
     src/sync.c
+    src/synchronizer.c
 )
 
 set(FSYNC_SOURCES

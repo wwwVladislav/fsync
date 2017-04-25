@@ -1,5 +1,6 @@
 #include "sync.h"
 #include "fsutils.h"
+#include "synchronizer.h"
 #include <fcommon/limits.h>
 #include <fcommon/messages.h>
 #include <fdb/sync/files.h>
@@ -21,6 +22,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdbool.h>
 
 static struct timespec const F1_SEC = { 1, 0 };
 static struct timespec const F10_MSEC = { 0, 10000000 };
@@ -440,7 +442,15 @@ static void *fsync_thread(void *param)
         while(psync->is_sync_active && sem_timedwait(&psync->sync_sem, &tm) == -1 && errno == EINTR)
             continue;       // Restart if interrupted by handler
 
-        printf("Get next file\n");
+        printf("Synchronization...\n");
+
+        fsynchronizer_t *synchronizer = fsynchronizer_create(psync->msgbus, psync->db, &psync->uuid);
+        if (synchronizer)
+        {
+            while(fsynchronizer_update(synchronizer));
+            fsynchronizer_free(synchronizer);
+        }
+
         ffile_info_t file_info = { 0 };
 
         fdb_transaction_t transaction = { 0 };

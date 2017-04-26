@@ -8,6 +8,7 @@ set(FUTILS_HEADERS
     src/md5.h
     src/prefix_tree.h
     src/queue.h
+    src/vector.h
     src/static_allocator.h
     src/static_assert.h
     src/msgbus.h
@@ -18,6 +19,7 @@ set(FUTILS_SOURCES
     src/md5.c
     src/prefix_tree.c
     src/queue.c
+    src/vector.c
     src/static_allocator.c
     src/msgbus.c
 )

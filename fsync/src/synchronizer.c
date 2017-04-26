@@ -1,13 +1,41 @@
 #include "synchronizer.h"
 #include <futils/log.h>
+#include <futils/vector.h>
+#include <fdb/sync/nodes.h>
+#include <fdb/sync/statuses.h>
+#include <fdb/sync/files.h>
 #include <string.h>
 #include <stdlib.h>
 
+enum
+{
+    FDB_FILES_LIST_SIZE     = 10000,    // Max number of files for sync for all nodes
+    FDB_MAX_REQUESTED_PARTS = 128,      // Max number of requested parts
+    FDB_MAX_SYNC_FILES      = 64        // Max number of synchronized files
+};
+
+typedef struct
+{
+    uint32_t    file_id;
+    fuuid_t     uuid;
+    uint32_t    uuid_file_id;
+} fsynchronizer_file_dst_info_t;
+
+typedef struct
+{
+    uint32_t    file_id;
+    uint64_t    size;
+    uint64_t    received_size;
+} fsynchronizer_file_t;
+
 struct fsynchronizer
 {
-    fuuid_t    uuid;
-    fmsgbus_t *msgbus;
-    fdb_t     *db;
+    fuuid_t                 uuid;                               // uuid
+    fmsgbus_t              *msgbus;                             // messages bus
+    fdb_t                  *db;                                 // db
+    fvector_t              *fsynchronizer_file_dst;             // file destinations
+    // fsynchronizer_file_t    sync_files[FDB_MAX_SYNC_FILES];     // synchronized files
+    // uint32_t                sync_files_size;                    // number of synchronized files
 };
 
 static void fsynchronizer_msgbus_retain(fsynchronizer_t *psynchronizer, fmsgbus_t *pmsgbus)
@@ -28,55 +56,68 @@ static void fsynchronizer_msgbus_release(fsynchronizer_t *psynchronizer)
     fmsgbus_release(psynchronizer->msgbus);
 }
 
-static bool fsynchronizer_prepare(fsynchronizer_t *psynchronizer)
+static bool fsynchronizer_update_peers_list(fsynchronizer_t *psynchronizer)
 {
     bool ret = false;
 
     fdb_transaction_t transaction = { 0 };
-    if (fdb_transaction_start(psync->db, &transaction))
+    if (fdb_transaction_start(psynchronizer->db, &transaction))
     {
         fdb_map_t status_map = { 0 };
-        if (fdb_files_statuses(&transaction, &psync->uuid, &status_map))
+        if (fdb_files_statuses(&transaction, &psynchronizer->uuid, &status_map))
         {
-            fdb_nodes_t *nodes = fdb_nodes(&transaction);
-            if (nodes)
+            fdb_files_map_t *files_map = fdb_files(&transaction, &psynchronizer->uuid);
+            if (files_map)
             {
-                fdb_statuses_map_iterator_t *statuses_map_iterator = fdb_statuses_map_iterator(&status_map, &transaction, FFILE_IS_EXIST);
-                if (statuses_map_iterator)
-                {
-                    fdb_data_t file_id = { 0 };
-                    for(bool st = fdb_statuses_map_iterator_first(statuses_map_iterator, &file_id); st; st = fdb_statuses_map_iterator_next(statuses_map_iterator, &file_id))
-                    {
-                        //fdb_nodes_iterator_t *nodes_it = fdb_nodes_iterator(nodes, &transaction);
-                    }
-                    fdb_statuses_map_iterator_free(statuses_map_iterator);
-                }
-                fdb_nodes_release(nodes);
-            }
-/*
-            fdb_data_t file_id = { 0 };
-            if (fdb_statuses_map_get(&status_map, &transaction, FFILE_IS_EXIST, &file_id))
-            {
-                printf("Search nodes\n");
-                // I. Find all nodes where the file is exist
                 fdb_nodes_t *nodes = fdb_nodes(&transaction);
                 if (nodes)
                 {
-                    fdb_nodes_iterator_t *nodes_it = fdb_nodes_iterator(nodes, &transaction);
-                    fuuid_t uuid;
-                    fdb_node_info_t node_info;
-                    for (bool st = fdb_nodes_first(nodes_it, &uuid, &node_info); st; st = fdb_nodes_next(nodes_it, &uuid, &node_info))
+                    fdb_statuses_map_iterator_t *statuses_map_iterator = fdb_statuses_map_iterator(&status_map, &transaction, FFILE_IS_EXIST);
+                    if (statuses_map_iterator)
                     {
-                        printf("ololo\n");
-                        // TODO:
+                        fdb_data_t file_id = { 0 };
+                        for(bool st = fdb_statuses_map_iterator_first(statuses_map_iterator, &file_id); st; st = fdb_statuses_map_iterator_next(statuses_map_iterator, &file_id))
+                        {
+                            ffile_info_t file_info = { 0 };
+                            uint32_t const id = *(uint32_t*)file_id.data;
+
+                            if (fdb_file_get(files_map, &transaction, id, &file_info))
+                            {
+                                fdb_nodes_iterator_t *nodes_iterator = fdb_nodes_iterator(nodes, &transaction);
+                                if (nodes_iterator)
+                                {
+                                    fuuid_t uuid;
+                                    fdb_node_info_t node_info;
+
+                                    for (bool nst = fdb_nodes_first(nodes_iterator, &uuid, &node_info); nst; nst = fdb_nodes_next(nodes_iterator, &uuid, &node_info))
+                                    {
+                                        fdb_files_map_t *files_map4uuid = fdb_files(&transaction, &uuid);
+                                        if (files_map4uuid)
+                                        {
+                                            ffile_info_t info = { 0 };
+                                            if (fdb_file_get_by_path(files_map4uuid, &transaction, file_info.path, strlen(file_info.path), &info))
+                                            {
+                                                if (info.status & FFILE_IS_EXIST)
+                                                {
+                                                    // id -> uuid, info.id
+                                                    printf("ololo\n");
+                                                    // TODO:
+                                                    ret = true;
+                                                }
+                                            }
+                                            fdb_files_release(files_map4uuid);
+                                        }
+                                    }
+                                    fdb_nodes_iterator_free(nodes_iterator);
+                                }
+                            }
+                        }
+                        fdb_statuses_map_iterator_free(statuses_map_iterator);
                     }
-                    fdb_nodes_iterator_free(nodes_it);
                     fdb_nodes_release(nodes);
                 }
-
-                // TODO
+                fdb_files_release(files_map);
             }
-*/
             fdb_map_close(&status_map);
         }
         fdb_transaction_abort(&transaction);
@@ -105,7 +146,7 @@ fsynchronizer_t *fsynchronizer_create(fmsgbus_t *pmsgbus, fdb_t *db, fuuid_t con
     fsynchronizer_msgbus_retain(psynchronizer, pmsgbus);
     psynchronizer->db = fdb_retain(db);
 
-    if (!fsynchronizer_prepare(psynchronizer))
+    if (!fsynchronizer_update_peers_list(psynchronizer))
     {
         fsynchronizer_free(psynchronizer);
         return 0;

@@ -450,7 +450,7 @@ static void *fsync_thread(void *param)
             while(fsynchronizer_update(synchronizer));
             fsynchronizer_free(synchronizer);
         }
-
+#if 0
         ffile_info_t file_info = { 0 };
 
         fdb_transaction_t transaction = { 0 };
@@ -485,7 +485,7 @@ static void *fsync_thread(void *param)
             }
             fdb_transaction_abort(&transaction);
         }
-
+#endif
         // bool fdb_file_get_by_status(fdb_files_transaction_t *transaction, ffile_status_t status, ffile_info_t *info);
 /* TODO:
         while (psync->is_sync_active && fdb_file_get_by_status(&psync->uuid, &file_info))

@@ -1,5 +1,6 @@
 #include "vector.h"
 #include <string.h>
+#include <stdlib.h>
 
 static const uint32_t FVECTOR_MIN_CAPACITY = 32u;
 
@@ -50,6 +51,16 @@ void fvector_release(fvector_t *pvector)
 uint8_t *fvector_ptr(fvector_t *pvector)
 {
     return pvector ? (uint8_t*)(pvector + 1) : 0;
+}
+
+size_t fvector_size(fvector_t const *pvector)
+{
+    return pvector->size;
+}
+
+size_t fvector_capacity(fvector_t const *pvector)
+{
+    return pvector->capacity;
 }
 
 bool fvector_push_back(fvector_t **pvector, void const *data)
@@ -103,4 +114,10 @@ bool fvector_pop_back(fvector_t **pvector, void *data)
     }
     (*pvector)->size--;
     return true;
+}
+
+void fvector_qsort(fvector_t *pvector, int (*compar)(const void *, const void*))
+{
+    if (pvector)
+        qsort(fvector_ptr(pvector), pvector->size, pvector->item_size, compar);
 }

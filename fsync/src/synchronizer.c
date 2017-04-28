@@ -164,6 +164,8 @@ static bool fsynchronizer_update_peers_list(fsynchronizer_t *psynchronizer)
                     fdb_statuses_map_iterator_t *statuses_map_iterator = fdb_statuses_map_iterator(&status_map, &transaction, FFILE_IS_EXIST);
                     if (statuses_map_iterator)
                     {
+                        ret = true;
+
                         fdb_data_t file_id = { 0 };
                         for(bool st = fdb_statuses_map_iterator_first(statuses_map_iterator, &file_id); st; st = fdb_statuses_map_iterator_next(statuses_map_iterator, &file_id))
                         {
@@ -191,15 +193,66 @@ static bool fsynchronizer_update_peers_list(fsynchronizer_t *psynchronizer)
                                                     fsynchronizer_file_src_info_t const file_src = { id, uuid, info.id };
                                                     if (!fvector_push_back(&psynchronizer->file_src, &file_src))
                                                         FS_ERR("File info wasn't remembered");
-                                                    ret = true;
+                                                    else ret = false;
                                                 }
-                                            }
+                                            } else ret = false;
                                             fdb_files_release(files_map4uuid);
-                                        }
+                                        } else ret = false;
                                     }
                                     fdb_nodes_iterator_free(nodes_iterator);
-                                }
-                            }
+                                } else ret = false;
+                            } else ret = false;
+                        }
+                        fdb_statuses_map_iterator_free(statuses_map_iterator);
+                    }
+                    fdb_nodes_release(nodes);
+                }
+                fdb_files_release(files_map);
+            }
+            fdb_map_close(&status_map);
+        }
+        fdb_transaction_abort(&transaction);
+    }
+
+    fvector_qsort(psynchronizer->file_src, fsynchronizer_file_src_info_cmp);
+
+    return ret;
+}
+
+static bool fsynchronizer_update_sync_files_list(fsynchronizer_t *psynchronizer)
+{
+    bool ret = false;
+
+    fdb_transaction_t transaction = { 0 };
+    if (fdb_transaction_start(psynchronizer->db, &transaction))
+    {
+        fdb_map_t status_map = { 0 };
+        if (fdb_files_statuses(&transaction, &psynchronizer->uuid, &status_map))
+        {
+            fdb_files_map_t *files_map = fdb_files(&transaction, &psynchronizer->uuid);
+            if (files_map)
+            {
+                fdb_nodes_t *nodes = fdb_nodes(&transaction);
+                if (nodes)
+                {
+                    fdb_statuses_map_iterator_t *statuses_map_iterator = fdb_statuses_map_iterator(&status_map, &transaction, FFILE_IS_EXIST);
+                    if (statuses_map_iterator)
+                    {
+                        ret = true;
+
+                        fdb_data_t file_id = { 0 };
+                        for(bool st = fdb_statuses_map_iterator_first(statuses_map_iterator, &file_id); st; st = fdb_statuses_map_iterator_next(statuses_map_iterator, &file_id))
+                        {
+                            ffile_info_t file_info = { 0 };
+                            uint32_t const id = *(uint32_t*)file_id.data;
+
+                            if (fdb_file_get(files_map, &transaction, id, &file_info))
+                            {
+                                fsynchronizer_file_t const sync_file = { id, file_info.size, 0 };
+                                if (!fvector_push_back(&psynchronizer->sync_files, &sync_file))
+                                    FS_ERR("Sync file info wasn't remembered");
+                                else ret = false;
+                            } else ret = false;
                         }
                         fdb_statuses_map_iterator_free(statuses_map_iterator);
                     }
@@ -251,7 +304,8 @@ fsynchronizer_t *fsynchronizer_create(fmsgbus_t *pmsgbus, fdb_t *db, fuuid_t con
         return 0;
     }
 
-    if (!fsynchronizer_update_peers_list(psynchronizer))
+    if (!fsynchronizer_update_peers_list(psynchronizer) ||
+        !fsynchronizer_update_sync_files_list(psynchronizer))
     {
         fsynchronizer_free(psynchronizer);
         return 0;

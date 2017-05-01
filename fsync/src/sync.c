@@ -231,6 +231,8 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
         files_map = fdb_files(&transaction, &msg->uuid);
         if (files_map)
         {
+            FS_INFO("Received %u files info", msg->files_num);
+
             for(uint32_t i = 0; i < msg->files_num; ++i)
             {
                 ffile_info_t info;
@@ -247,9 +249,11 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
             fdb_transaction_commit(&transaction);
             fdb_files_release(files_map);
         }
+        else FS_ERR("Files map wasn't opened");
 
         fdb_transaction_abort(&transaction);
     }
+    else FS_ERR("Transaction wasn't started");
 
     // Local files list (-)
     if (fdb_transaction_start(psync->db, &transaction))
@@ -299,27 +303,91 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
                     is_need_sync |= is_absent;
                 }
 
+                fdb_transaction_commit(&transaction);
+                fdb_files_release(files_map);
+                fdb_map_close(&status_map);
+
                 if (is_need_sync)
                 {
                     files_list.is_last = true;
                     if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
                         FS_ERR("Files list not published");
                 }
-
-                fdb_transaction_commit(&transaction);
-                fdb_files_release(files_map);
-                fdb_map_close(&status_map);
             }
+            else FS_ERR("Statuses map wasn't opened");
         }
+        else FS_ERR("Files map wasn't opened");
 
         fdb_transaction_abort(&transaction);
     }
+    else FS_ERR("Transaction wasn't started");
 
     if (is_need_sync)
+    {
+        FS_INFO("Wake up the synchronization thread");
         sem_post(&psync->sync_sem);
+    }
 
     if (msg->is_last)
+    {
+        FS_INFO("Notify files lists difference");
         fsync_notify_files_diff(psync, &msg->uuid);
+    }
+}
+
+static void fsync_file_part_request_handler(fsync_t *psync, uint32_t msg_type, fmsg_file_part_request_t const *msg, uint32_t size)
+{
+    (void)size;
+    (void)msg_type;
+
+    if (memcmp(&msg->uuid, &psync->uuid, sizeof psync->uuid) != 0)
+    {
+        FS_INFO("UUID %llx%llx requests file content. Id=%u, part=%u", msg->uuid.data.u64[0], msg->uuid.data.u64[1], msg->id, msg->block_number);
+
+        char path[2 * FMAX_PATH];
+        size_t len = strlen(psync->dir);
+        strncpy(path, psync->dir, sizeof path);
+        path[len++] = '/';
+
+        fdb_transaction_t transaction = { 0 };
+        if (fdb_transaction_start(psync->db, &transaction))
+        {
+            fdb_files_map_t *files_map = fdb_files(&transaction, &psync->uuid);
+            if (files_map)
+            {
+                if (fdb_file_path(files_map, &transaction, msg->id, path + len, sizeof path - len))
+                {
+                    int fd = open(path, O_BINARY | O_RDONLY);
+                    if (fd != -1)
+                    {
+                        fmsg_file_part_t part;
+                        part.uuid         = psync->uuid;
+                        part.destination  = msg->uuid;
+                        part.id           = msg->id;
+                        part.block_number = msg->block_number;
+
+                        if (lseek(fd, part.block_number * sizeof part.data, SEEK_SET) >= 0)
+                        {
+                            ssize_t size = read(fd, part.data, sizeof part.data);
+                            if (size > 0)
+                            {
+                                part.size = size;
+                                if (fmsgbus_publish(psync->msgbus, FFILE_PART, &part, sizeof part) != FSUCCESS)
+                                    FS_ERR("File part message not published");
+                            }
+                            else FS_ERR("File reading failed");
+                        }
+                        else FS_ERR("lseek failed");
+
+                        close(fd);
+                    }
+                    else FS_ERR("Unable to open the file: \'%s\'", path);
+                }
+                fdb_files_release(files_map);
+            }
+            fdb_transaction_abort(&transaction);
+        }
+    }
 }
 
 static void fsync_msgbus_retain(fsync_t *psync, fmsgbus_t *pmsgbus)
@@ -327,13 +395,14 @@ static void fsync_msgbus_retain(fsync_t *psync, fmsgbus_t *pmsgbus)
     psync->msgbus = fmsgbus_retain(pmsgbus);
     fmsgbus_subscribe(psync->msgbus, FNODE_STATUS,          (fmsg_handler_t)fsync_status_handler,            psync);
     fmsgbus_subscribe(psync->msgbus, FSYNC_FILES_LIST,      (fmsg_handler_t)fsync_sync_files_list_handler,   psync);
-
+    fmsgbus_subscribe(psync->msgbus, FFILE_PART_REQUEST,    (fmsg_handler_t)fsync_file_part_request_handler, psync);
 }
 
 static void fsync_msgbus_release(fsync_t *psync)
 {
     fmsgbus_unsubscribe(psync->msgbus, FNODE_STATUS,        (fmsg_handler_t)fsync_status_handler);
     fmsgbus_unsubscribe(psync->msgbus, FSYNC_FILES_LIST,    (fmsg_handler_t)fsync_sync_files_list_handler);
+    fmsgbus_unsubscribe(psync->msgbus, FFILE_PART_REQUEST,  (fmsg_handler_t)fsync_file_part_request_handler);
     fmsgbus_release(psync->msgbus);
 }
 
@@ -350,12 +419,15 @@ static void *fsync_thread(void *param)
         while(psync->is_sync_active && sem_timedwait(&psync->sync_sem, &tm) == -1 && errno == EINTR)
             continue;       // Restart if interrupted by handler
 
+        if (!psync->is_sync_active)
+            break;
+
         printf("Synchronization...\n");
 
-        fsynchronizer_t *synchronizer = fsynchronizer_create(psync->msgbus, psync->db, &psync->uuid);
+        fsynchronizer_t *synchronizer = fsynchronizer_create(psync->msgbus, psync->db, &psync->uuid, psync->dir);
         if (synchronizer)
         {
-            while(fsynchronizer_update(synchronizer));
+            while(psync->is_sync_active && fsynchronizer_update(synchronizer));
             fsynchronizer_free(synchronizer);
         }
 
@@ -678,6 +750,7 @@ void fsync_free(fsync_t *psync)
         sem_destroy(&psync->sync_sem);
         fsync_msgbus_release(psync);
         fdb_release(psync->db);
+        memset(psync, 0, sizeof *psync);
         free(psync);
     }
 }

@@ -174,6 +174,7 @@ void fdb_map_close(fdb_map_t *pmap)
         {
             mdb_dbi_close(pmap->pdb->env, dbi);
             fdb_release(pmap->pdb);
+            pmap->pdb = 0;
         }
     }
 }

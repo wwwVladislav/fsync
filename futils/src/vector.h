@@ -15,5 +15,6 @@ size_t fvector_capacity(fvector_t const *);
 bool fvector_push_back(fvector_t **, void const*);
 bool fvector_pop_back(fvector_t **, void *);
 void fvector_qsort(fvector_t *, int (*compar)(const void *, const void*));
+void *fvector_bsearch(fvector_t *, void const* key, int (*compar)(const void *, const void*));
 
 #endif

@@ -6,12 +6,14 @@ set(FSYNC_HEADERS
     src/fsutils.h
     src/sync.h
     src/synchronizer.h
+    src/file_assembler.h
 )
 
 set(FSYNC_SOURCES
     src/fsutils.c
     src/sync.c
     src/synchronizer.c
+    src/file_assembler.c
 )
 
 set(FSYNC_SOURCES

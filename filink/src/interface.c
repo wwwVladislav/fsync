@@ -506,6 +506,7 @@ void filink_release(filink_t *ilink)
             filink_disconnect_all(ilink);
             filink_msgbus_release(ilink);
             fdb_release(ilink->db);
+            memset(ilink, 0, sizeof *ilink);
             free(ilink);
         }
     }

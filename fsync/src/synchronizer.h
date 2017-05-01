@@ -7,7 +7,7 @@
 
 typedef struct fsynchronizer fsynchronizer_t;
 
-fsynchronizer_t *fsynchronizer_create(fmsgbus_t *pmsgbus, fdb_t *db, fuuid_t const *uuid);
+fsynchronizer_t *fsynchronizer_create(fmsgbus_t *pmsgbus, fdb_t *db, fuuid_t const *uuid, char const *dir);
 void             fsynchronizer_free(fsynchronizer_t *);
 bool             fsynchronizer_update(fsynchronizer_t *);
 

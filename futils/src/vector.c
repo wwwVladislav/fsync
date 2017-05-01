@@ -121,3 +121,10 @@ void fvector_qsort(fvector_t *pvector, int (*compar)(const void *, const void*))
     if (pvector)
         qsort(fvector_ptr(pvector), pvector->size, pvector->item_size, compar);
 }
+
+void *fvector_bsearch(fvector_t *pvector, void const* key, int (*compar)(const void *, const void*))
+{
+    if (!pvector)
+        return 0;
+    return bsearch(key, fvector_ptr(pvector), pvector->size, pvector->item_size, compar);
+}

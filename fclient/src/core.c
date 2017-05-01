@@ -96,6 +96,7 @@ void fcore_stop(fcore_t *pcore)
         fsync_free(pcore->sync);
         fmsgbus_release(pcore->msgbus);
         fdb_release(pcore->db);
+        memset(pcore, 0, sizeof *pcore);
         free(pcore);
     }
 }

@@ -6,7 +6,6 @@ set(FUTILS_HEADERS
     src/errno.h
     src/log.h
     src/md5.h
-    src/prefix_tree.h
     src/queue.h
     src/vector.h
     src/static_allocator.h
@@ -17,7 +16,6 @@ set(FUTILS_HEADERS
 set(FUTILS_SOURCES
     src/log.c
     src/md5.c
-    src/prefix_tree.c
     src/queue.c
     src/vector.c
     src/static_allocator.c

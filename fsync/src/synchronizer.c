@@ -118,31 +118,6 @@ static void fsynchronizer_file_part_handler(fsynchronizer_t *psynchronizer, uint
             fsync_pop_lock();
         }
     }
-
-#if 0
-    if (fdb_file_path(&msg->uuid, msg->id, path + len, sizeof path - len))
-    {
-        int fd = open(path, O_CREAT | O_BINARY | O_WRONLY, 0777);
-        if (fd != -1)
-        {
-            if (lseek(fd, msg->block_number * sizeof msg->data, SEEK_SET) >= 0)
-            {
-                if (write(fd, msg->data, msg->size) < 0)
-                    FS_ERR("Unable to write data into the file: \'%s\'", path);
-                else
-                {
-                    ffile_info_t info;
-                    // TODO: if(fdb_file_get(&psync->uuid, path + len, &info))
-                    // TODO:   fdb_sync_part_received(&psync->uuid, info.id, msg->block_number);
-                }
-            }
-            else FS_ERR("lseek failed");
-
-            close(fd);
-        }
-        else FS_ERR("Unable to open the file: \'%s\'. Error: %d", path, errno);
-    }
-#endif
 }
 
 static void fsynchronizer_msgbus_retain(fsynchronizer_t *psynchronizer, fmsgbus_t *pmsgbus)

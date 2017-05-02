@@ -8,7 +8,6 @@
 #include <fdb/sync/nodes.h>
 #include <futils/log.h>
 #include <futils/queue.h>
-#include <futils/static_allocator.h>
 #define RSYNC_NO_STDIO_INTERFACE
 #include <librsync.h>
 #include <stdlib.h>
@@ -430,60 +429,6 @@ static void *fsync_thread(void *param)
             while(psync->is_sync_active && fsynchronizer_update(synchronizer));
             fsynchronizer_free(synchronizer);
         }
-
-        // bool fdb_file_get_by_status(fdb_files_transaction_t *transaction, ffile_status_t status, ffile_info_t *info);
-/* TODO:
-        while (psync->is_sync_active && fdb_file_get_by_status(&psync->uuid, &file_info))
-        {
-            printf("Search nodes\n");
-            // I. Find all nodes where the file is exist
-            fuuid_t uuids[FMAX_CONNECTIONS_NUM];
-            uint32_t ids[FMAX_CONNECTIONS_NUM];
-            uint32_t n = fdb_get_uuids_where_file_is_exist(uuids, ids, file_info.path);
-            if (!n) break;
-
-            // II. TODO: Find all active nodes
-            // III. Request parts from active nodes
-
-            printf("Start sync\n");
-            if (!fdb_sync_start(file_info.id, FSYNC_BLOCK_REQ_TIMEOUT, FSYNC_MAX_REQ_PARTS_NUM, file_info.size))
-                break;
-
-            bool completed = false;
-
-            printf("File exist in %d nodes\n", n);
-
-            while(psync->is_sync_active && !completed)
-            {
-                uint32_t i = 0;
-                for(; i < n; ++i)
-                {
-                    uint32_t part = 0;
-                    if(fdb_sync_next_part(file_info.id, &part, &completed))
-                    {
-                        printf("Request %u\n", part);
-                        fmsg_file_part_request_t const req =
-                        {
-                            psync->uuid,
-                            uuids[i],
-                            ids[i],
-                            part
-                        };
-
-                        if (fmsgbus_publish(psync->msgbus, FFILE_PART_REQUEST, &req, sizeof req) != FSUCCESS)
-                        {
-                            FS_ERR("File part not requested");
-                            break;
-                        }
-                    }
-                    else break;
-                }
-
-                if (i < n)
-                    nanosleep(&F10_MSEC, NULL);
-            }
-        }
-*/ 
     }
 
     return false;

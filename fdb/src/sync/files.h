@@ -44,10 +44,6 @@ bool fdb_file_get_by_path(fdb_files_map_t *files_map, fdb_transaction_t *transac
 bool fdb_file_del_all(fuuid_t const *uuid);
 bool fdb_file_path(fdb_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id, char *path, size_t size);
 
-bool fdb_sync_start(uint32_t id, uint32_t threshold_delta_time, uint32_t requested_parts_threshold, uint64_t size);
-bool fdb_sync_next_part(uint32_t id, uint32_t *part, bool *completed);
-void fdb_sync_part_received(fuuid_t const *uuid, uint32_t id, uint32_t part);
-
 typedef enum
 {
     FDB_FILE_ABSENT = 0,
@@ -63,8 +59,5 @@ fdb_files_diff_iterator_t *fdb_files_diff_iterator(fdb_files_map_t *map_1, fdb_f
 void                       fdb_files_diff_iterator_free(fdb_files_diff_iterator_t *);
 bool                       fdb_files_diff_iterator_first(fdb_files_diff_iterator_t *, ffile_info_t *, fdb_diff_kind_t *);
 bool                       fdb_files_diff_iterator_next(fdb_files_diff_iterator_t *, ffile_info_t *, fdb_diff_kind_t *);
-
-uint32_t                   fdb_get_uuids(fuuid_t uuids[FMAX_CONNECTIONS_NUM]);
-uint32_t                   fdb_get_uuids_where_file_is_exist(fuuid_t uuids[FMAX_CONNECTIONS_NUM], uint32_t ids[FMAX_CONNECTIONS_NUM], char const *path);
 
 #endif

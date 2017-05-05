@@ -9,6 +9,8 @@ static void fhelp()
     printf("  help - print help\n");
     printf("  connect IP:port - connect to other node\n");
     printf("  sync path - synchronize directories\n");
+    printf("  index path - calculate index for files in directory for search\n"
+           "             or shows indexed directories list (if it was called without arg)\n");
     printf("  nodes - print nodes list\n");
 }
 
@@ -28,6 +30,29 @@ static void fsync(fcore_t *core, char *cmd)
     for(; *c && !isspace(*c); ++c);
     *c = 0;
     fcore_sync(core, cmd);
+}
+
+static void findex(fcore_t *core, char *cmd)
+{
+    for(; *cmd && isspace(*cmd); ++cmd);
+    char *c = cmd;
+    for(; *c && !isspace(*c); ++c);
+    *c = 0;
+    if (c != cmd)
+        fcore_index(core, cmd);
+    else
+    {
+        printf("Directories:\n");
+
+        fcore_dirs_iterator_t *it = fcore_dirs_iterator(core);
+        if (it)
+        {
+            fcore_dir_info_t info = { 0 };
+            for(bool st = fcore_dirs_first(it, &info); st; st = fcore_dirs_next(it, &info))
+                printf("%s\n", info.path);
+            fcore_dirs_iterator_free(it);
+        }
+    }
 }
 
 static void fnodes(fcore_t *core)
@@ -50,6 +75,7 @@ static const char CMD_EXIT[4]    = "exit";
 static const char CMD_HELP[4]    = "help";
 static const char CMD_CONNECT[7] = "connect";
 static const char CMD_SYNC[4]    = "sync";
+static const char CMD_INDEX[5]   = "index";
 static const char CMD_NODES[5]   = "nodes";
 
 int main(int argc, char **argv)
@@ -70,6 +96,7 @@ int main(int argc, char **argv)
             else if (strncasecmp(cmd, CMD_HELP, sizeof CMD_HELP) == 0)          fhelp();
             else if (strncasecmp(cmd, CMD_CONNECT, sizeof CMD_CONNECT) == 0)    fconnect(core, cmd + sizeof CMD_CONNECT);
             else if (strncasecmp(cmd, CMD_SYNC, sizeof CMD_SYNC) == 0)          fsync(core, cmd + sizeof CMD_SYNC);
+            else if (strncasecmp(cmd, CMD_INDEX, sizeof CMD_INDEX) == 0)        findex(core, cmd + sizeof CMD_INDEX);
             else if (strncasecmp(cmd, CMD_NODES, sizeof CMD_NODES) == 0)        fnodes(core);
             else                                                                printf("Unknown command\n");
             printf(">");

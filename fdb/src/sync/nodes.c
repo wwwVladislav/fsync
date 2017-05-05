@@ -64,7 +64,7 @@ fdb_nodes_t *fdb_nodes_retain(fdb_nodes_t *nodes)
     if (nodes)
         nodes->ref_counter++;
     else
-        FS_ERR("Invalid map");
+        FS_ERR("Invalid nodes map");
     return nodes;
 }
 
@@ -73,7 +73,7 @@ void fdb_nodes_release(fdb_nodes_t *nodes)
     if (nodes)
     {
         if (!nodes->ref_counter)
-            FS_ERR("Invalid map");
+            FS_ERR("Invalid nodes map");
         else if (!--nodes->ref_counter)
         {
             fdb_map_close(&nodes->nodes_map);
@@ -81,7 +81,7 @@ void fdb_nodes_release(fdb_nodes_t *nodes)
         }
     }
     else
-        FS_ERR("Invalid files map");
+        FS_ERR("Invalid nodes map");
 }
 
 bool fdb_node_add(fdb_nodes_t *nodes, fdb_transaction_t *transaction, fuuid_t const *uuid, fdb_node_info_t const *info)

@@ -6,8 +6,10 @@
 #include <futils/msgbus.h>
 #include <filink/interface.h>
 #include <fsync/sync.h>
+#include <fsync/search_engine.h>
 #include <fdb/sync/config.h>
 #include <fdb/sync/nodes.h>
+#include <fdb/sync/dirs.h>
 
 static char const *FDB_DATA_SOURCE = "data";
 
@@ -20,10 +22,11 @@ enum
 
 struct fcore
 {
-    fmsgbus_t *msgbus;
-    filink_t  *ilink;
-    fsync_t   *sync;
-    fdb_t     *db;
+    fmsgbus_t        *msgbus;
+    fdb_t            *db;
+    filink_t         *ilink;
+    fsync_t          *sync;
+    fsearch_engine_t *search_engine;
     fconfig_t  config;
 };
 
@@ -81,6 +84,13 @@ fcore_t *fcore_start(char const *addr)
         return 0;
     }
 
+    pcore->search_engine = fsearch_engine(pcore->msgbus, pcore->db);
+    if (!pcore->search_engine)
+    {
+        fcore_stop(pcore);
+        return 0;
+    }
+
     char buf[2 * sizeof(fuuid_t) + 1] = { 0 };
     FS_INFO("Started node UUID: %s", fuuid2str(&pcore->config.uuid, buf, sizeof buf));
     FS_INFO("Listening: %s", pcore->config.address);
@@ -93,7 +103,8 @@ void fcore_stop(fcore_t *pcore)
     {
         filink_unbind(pcore->ilink);
         filink_release(pcore->ilink);
-        fsync_free(pcore->sync);
+        fsync_release(pcore->sync);
+        fsearch_engine_release(pcore->search_engine);
         fmsgbus_release(pcore->msgbus);
         fdb_release(pcore->db);
         memset(pcore, 0, sizeof *pcore);
@@ -127,11 +138,22 @@ bool fcore_sync(fcore_t *pcore, char const *dir)
     }
 
     if (pcore->sync)
-        fsync_free(pcore->sync);
+        fsync_release(pcore->sync);
 
     pcore->sync = fsync_create(pcore->msgbus, pcore->db, dir, &pcore->config.uuid);
 
     return true;
+}
+
+bool fcore_index(fcore_t *pcore, char const *dir)
+{
+    if (!pcore || !dir)
+    {
+        FS_ERR("Invalid argument");
+        return false;
+    }
+
+    return fsearch_engine_add_dir(pcore->search_engine, dir);
 }
 
 struct fcore_nodes_iterator
@@ -219,6 +241,92 @@ bool fcore_nodes_next(fcore_nodes_iterator_t *it, fcore_node_info_t *info)
     {
         strncpy(info->address, node_info.address, sizeof info->address);
         info->connected = filink_is_connected(it->ilink, &info->uuid);
+        return true;
+    }
+
+    return false;
+}
+
+struct fcore_dirs_iterator
+{
+    fdb_transaction_t     transaction;
+    fdb_dirs_iterator_t  *dirs_iterator;
+};
+
+fcore_dirs_iterator_t *fcore_dirs_iterator(fcore_t *pcore)
+{
+    if (!pcore)
+    {
+        FS_ERR("Invalid argument");
+        return false;
+    }
+
+    fcore_dirs_iterator_t *it = malloc(sizeof(fcore_dirs_iterator_t));
+    if (!it)
+        return false;
+    memset(it, 0, sizeof(fcore_dirs_iterator_t));
+
+    if (!fdb_transaction_start(pcore->db, &it->transaction))
+    {
+        fcore_dirs_iterator_free(it);
+        return 0;
+    }
+
+    fdb_dirs_t *dirs = fdb_dirs(&it->transaction);
+    if (!dirs)
+    {
+        fcore_dirs_iterator_free(it);
+        return 0;
+    }
+
+    it->dirs_iterator = fdb_dirs_iterator(dirs, &it->transaction);
+    fdb_dirs_release(dirs);
+
+    if (!it->dirs_iterator)
+    {
+        fcore_dirs_iterator_free(it);
+        return 0;
+    }
+
+    return it;
+}
+
+void fcore_dirs_iterator_free(fcore_dirs_iterator_t *it)
+{
+    if (it)
+    {
+        fdb_transaction_abort(&it->transaction);
+        fdb_dirs_iterator_free(it->dirs_iterator);
+        free(it);
+    }
+}
+
+bool fcore_dirs_first(fcore_dirs_iterator_t *it, fcore_dir_info_t *info)
+{
+    if (!it || !info)
+        return false;
+
+    fdir_info_t dir_info = { 0 };
+    bool ret = fdb_dirs_iterator_first(it->dirs_iterator, &dir_info);
+    if (ret)
+    {
+        strncpy(info->path, dir_info.path, sizeof info->path);
+        return true;
+    }
+
+    return false;
+}
+
+bool fcore_dirs_next(fcore_dirs_iterator_t *it, fcore_dir_info_t *info)
+{
+    if (!it || !info)
+        return false;
+
+    fdir_info_t dir_info = { 0 };
+    bool ret = fdb_dirs_iterator_next(it->dirs_iterator, &dir_info);
+    if (ret)
+    {
+        strncpy(info->path, dir_info.path, sizeof info->path);
         return true;
     }
 

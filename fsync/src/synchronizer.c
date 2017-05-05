@@ -4,7 +4,7 @@
 #include <futils/vector.h>
 #include <fdb/sync/nodes.h>
 #include <fdb/sync/statuses.h>
-#include <fdb/sync/files.h>
+#include <fdb/sync/sync_files.h>
 #include <fcommon/limits.h>
 #include <fcommon/messages.h>
 #include <string.h>
@@ -79,20 +79,20 @@ static void fsynchronizer_file_part_handler(fsynchronizer_t *psynchronizer, uint
         fdb_transaction_t transaction = { 0 };
         if (fdb_transaction_start(psynchronizer->db, &transaction))
         {
-            fdb_files_map_t *uuid_files_map = fdb_files(&transaction, &msg->uuid);
+            fdb_sync_files_map_t *uuid_files_map = fdb_sync_files(&transaction, &msg->uuid);
             if (uuid_files_map)
             {
-                fdb_file_path(uuid_files_map, &transaction, msg->id, path, sizeof path);
-                fdb_files_release(uuid_files_map);
+                fdb_sync_file_path(uuid_files_map, &transaction, msg->id, path, sizeof path);
+                fdb_sync_files_release(uuid_files_map);
             }
 
             if (path[0])
             {
-                fdb_files_map_t *files_map = fdb_files(&transaction, &psynchronizer->uuid);
+                fdb_sync_files_map_t *files_map = fdb_sync_files(&transaction, &psynchronizer->uuid);
                 if (files_map)
                 {
-                    fdb_file_id(files_map, &transaction, path, strlen(path), &id);
-                    fdb_files_release(files_map);
+                    fdb_sync_file_id(files_map, &transaction, path, strlen(path), &id);
+                    fdb_sync_files_release(files_map);
                 }
             }
 
@@ -140,9 +140,9 @@ static bool fsynchronizer_update_sync_files_list(fsynchronizer_t *psynchronizer)
     if (fdb_transaction_start(psynchronizer->db, &transaction))
     {
         fdb_map_t status_map = { 0 };
-        if (fdb_files_statuses(&transaction, &psynchronizer->uuid, &status_map))
+        if (fdb_sync_files_statuses(&transaction, &psynchronizer->uuid, &status_map))
         {
-            fdb_files_map_t *files_map = fdb_files(&transaction, &psynchronizer->uuid);
+            fdb_sync_files_map_t *files_map = fdb_sync_files(&transaction, &psynchronizer->uuid);
             if (files_map)
             {
                 fdb_nodes_t *nodes = fdb_nodes(&transaction);
@@ -156,10 +156,10 @@ static bool fsynchronizer_update_sync_files_list(fsynchronizer_t *psynchronizer)
                         fdb_data_t file_id = { 0 };
                         for(bool st = fdb_statuses_map_iterator_first(statuses_map_iterator, &file_id); ret && st; st = fdb_statuses_map_iterator_next(statuses_map_iterator, &file_id))
                         {
-                            ffile_info_t file_info = { 0 };
+                            fsync_file_info_t file_info = { 0 };
                             uint32_t const id = *(uint32_t*)file_id.data;
 
-                            if (fdb_file_get(files_map, &transaction, id, &file_info))
+                            if (fdb_sync_file_get(files_map, &transaction, id, &file_info))
                             {
                                 char path[2 * FMAX_PATH];
                                 size_t dir_path_len = strlen(psynchronizer->dir);
@@ -218,11 +218,11 @@ static bool fsynchronizer_update_sync_files_list(fsynchronizer_t *psynchronizer)
 
                                     for (bool nst = fdb_nodes_first(nodes_iterator, &uuid, &node_info); ret && nst; nst = fdb_nodes_next(nodes_iterator, &uuid, &node_info))
                                     {
-                                        fdb_files_map_t *files_map4uuid = fdb_files(&transaction, &uuid);
+                                        fdb_sync_files_map_t *files_map4uuid = fdb_sync_files(&transaction, &uuid);
                                         if (files_map4uuid)
                                         {
-                                            ffile_info_t info = { 0 };
-                                            if (fdb_file_get_by_path(files_map4uuid, &transaction, file_info.path, strlen(file_info.path), &info))
+                                            fsync_file_info_t info = { 0 };
+                                            if (fdb_sync_file_get_by_path(files_map4uuid, &transaction, file_info.path, strlen(file_info.path), &info))
                                             {
                                                 if (info.status & FFILE_IS_EXIST)
                                                 {
@@ -239,7 +239,7 @@ static bool fsynchronizer_update_sync_files_list(fsynchronizer_t *psynchronizer)
                                                 ret = false;
                                                 FS_ERR("Unable to find file information by path");
                                             }
-                                            fdb_files_release(files_map4uuid);
+                                            fdb_sync_files_release(files_map4uuid);
                                         }
                                         else
                                         {
@@ -265,7 +265,7 @@ static bool fsynchronizer_update_sync_files_list(fsynchronizer_t *psynchronizer)
                     }
                     fdb_nodes_release(nodes);
                 }
-                fdb_files_release(files_map);
+                fdb_sync_files_release(files_map);
             }
             fdb_map_close(&status_map);
         }
@@ -357,12 +357,50 @@ void fsynchronizer_free(fsynchronizer_t *psynchronizer)
     }
 }
 
+static void fsynchronizer_cleanup_ready_files_info(fsynchronizer_t *psynchronizer)
+{
+    fdb_transaction_t transaction = { 0 };
+    if (fdb_transaction_start(psynchronizer->db, &transaction))
+    {
+        fdb_map_t status_map = { 0 };
+        if (fdb_sync_files_statuses(&transaction, &psynchronizer->uuid, &status_map))
+        {
+            fsynchronizer_file_t *sync_files = (fsynchronizer_file_t *)fvector_ptr(psynchronizer->sync_files);
+            size_t sync_files_size = fvector_size(psynchronizer->sync_files);
+
+            for(size_t i = 0; i < sync_files_size;)
+            {
+                bool const file_is_ready = file_assembler_is_ready(sync_files[i].fassembler);
+
+                if (file_is_ready)
+                {
+                    fdb_data_t const file_id = { sizeof sync_files[i].file_id, &sync_files[i].file_id };
+                    fdb_statuses_map_del(&status_map, &transaction, FFILE_IS_EXIST, &file_id);
+
+                    if (fvector_erase(&psynchronizer->sync_files, i))
+                    {
+                        sync_files = (fsynchronizer_file_t *)fvector_ptr(psynchronizer->sync_files);
+                        sync_files_size = fvector_size(psynchronizer->sync_files);
+                    }
+                    else
+                        ++i;
+                }
+            }
+
+            fdb_transaction_commit(&transaction);
+            fdb_map_close(&status_map);
+        }
+        fdb_transaction_abort(&transaction);
+    }
+}
+
 bool fsynchronizer_update(fsynchronizer_t *psynchronizer)
 {
     if (!psynchronizer)
         return false;
 
     bool ret = false;
+    uint32_t ready_files_num = 0;
 
     time_t const now = time(0);
 
@@ -404,8 +442,15 @@ bool fsynchronizer_update(fsynchronizer_t *psynchronizer)
             }
         }
 
-        ret |= !file_assembler_is_ready(sync_files[i].fassembler);
+        bool const file_is_ready = file_assembler_is_ready(sync_files[i].fassembler);
+        if (file_is_ready)
+            ready_files_num++;
+
+        ret |= !file_is_ready;
     }
+
+    if (ready_files_num)
+        fsynchronizer_cleanup_ready_files_info(psynchronizer);
 
     fsync_pop_lock();
 

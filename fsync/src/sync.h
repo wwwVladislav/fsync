@@ -7,6 +7,7 @@
 typedef struct fsync fsync_t;
 
 fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t const *uuid);
-void     fsync_free(fsync_t *);
+fsync_t *fsync_retain(fsync_t *psync);
+void     fsync_release(fsync_t *psync);
 
 #endif

@@ -281,6 +281,16 @@ size_t fsdir_iterator_full_path(fsiterator_t *piterator, dirent_t *pentry, char 
     return fsget_directory_by_iterator(piterator, pentry->name, path, size, true);
 }
 
+bool fsdir_is_exist(char const *path)
+{
+    if (!path)
+        return false;
+    struct stat st;
+    if (stat(path, &st) == -1)
+        return false;
+    return (st.st_mode & S_IFDIR) != 0;
+}
+
 char fspath_delimiter(char const *path)
 {
     char delimiter = '/';

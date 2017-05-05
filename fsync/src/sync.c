@@ -3,7 +3,7 @@
 #include "synchronizer.h"
 #include <fcommon/limits.h>
 #include <fcommon/messages.h>
-#include <fdb/sync/files.h>
+#include <fdb/sync/sync_files.h>
 #include <fdb/sync/statuses.h>
 #include <fdb/sync/nodes.h>
 #include <futils/log.h>
@@ -35,6 +35,7 @@ enum
 
 struct fsync
 {
+    volatile uint32_t    ref_counter;
     fuuid_t              uuid;
     char                 dir[FMAX_PATH];
 
@@ -85,10 +86,10 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
 
     if (fdb_transaction_start(psync->db, &transaction))
     {
-        fdb_files_map_t *files_map = fdb_files(&transaction, &psync->uuid);
+        fdb_sync_files_map_t *files_map = fdb_sync_files(&transaction, &psync->uuid);
         if (files_map)
         {
-            fdb_files_iterator_t *files_iterator = fdb_files_iterator(files_map, &transaction);
+            fdb_sync_files_iterator_t *files_iterator = fdb_sync_files_iterator(files_map, &transaction);
             if (files_iterator)
             {
                 fmsg_sync_files_list_t files_list;
@@ -97,13 +98,13 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
                 files_list.is_last = false;
                 files_list.files_num = 0;
 
-                ffile_info_t info;
+                fsync_file_info_t info;
 
-                for (bool st = fdb_files_iterator_first(files_iterator, &info); st; st = fdb_files_iterator_next(files_iterator, &info))
+                for (bool st = fdb_sync_files_iterator_first(files_iterator, &info); st; st = fdb_sync_files_iterator_next(files_iterator, &info))
                 {
                     if ((info.status & FFILE_IS_EXIST) != 0)
                     {
-                        fsync_file_info_t *file_info = &files_list.files[files_list.files_num++];
+                        fmsg_sync_file_info_t *file_info = &files_list.files[files_list.files_num++];
                         file_info->id       = info.id;
                         file_info->digest   = info.digest;
                         file_info->size     = info.size;
@@ -118,21 +119,21 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
                         }
                     }
                 }
-                fdb_files_iterator_free(files_iterator);
+                fdb_sync_files_iterator_free(files_iterator);
 
                 files_list.is_last = true;
                 if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
                     FS_ERR("Files list not published");
             }
 
-            fdb_files_release(files_map);
+            fdb_sync_files_release(files_map);
         }
 
         fdb_transaction_abort(&transaction);
     }
 }
 
-static void fsync_file_info_get(fsync_file_info_t const *sync_info, ffile_info_t *info)
+static void fsync_file_info_get(fmsg_sync_file_info_t const *sync_info, fsync_file_info_t *info)
 {
     time_t const cur_time = time(0);
     memset(info, 0, sizeof *info);
@@ -153,13 +154,13 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
 
     if (fdb_transaction_start(psync->db, &transaction))
     {
-        fdb_files_map_t *files_map_1 = fdb_files(&transaction, &psync->uuid);
+        fdb_sync_files_map_t *files_map_1 = fdb_sync_files(&transaction, &psync->uuid);
         if (files_map_1)
         {
-            fdb_files_map_t *files_map_2 = fdb_files(&transaction, uuid);
+            fdb_sync_files_map_t *files_map_2 = fdb_sync_files(&transaction, uuid);
             if (files_map_2)
             {
-                fdb_files_diff_iterator_t *diff = fdb_files_diff_iterator(files_map_1, files_map_2, &transaction);
+                fdb_sync_files_diff_iterator_t *diff = fdb_sync_files_diff_iterator(files_map_1, files_map_2, &transaction);
                 if (diff)
                 {
                     fmsg_sync_files_list_t files_list;
@@ -168,14 +169,14 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
                     files_list.is_last = false;
                     files_list.files_num = 0;
 
-                    ffile_info_t info;
+                    fsync_file_info_t info;
                     bool have_diff = false;
 
-                    for (bool st = fdb_files_diff_iterator_first(diff, &info, 0); st; st = fdb_files_diff_iterator_next(diff, &info, 0))
+                    for (bool st = fdb_sync_files_diff_iterator_first(diff, &info, 0); st; st = fdb_sync_files_diff_iterator_next(diff, &info, 0))
                     {
                         have_diff = true;
 
-                        fsync_file_info_t *file_info = &files_list.files[files_list.files_num++];
+                        fmsg_sync_file_info_t *file_info = &files_list.files[files_list.files_num++];
                         file_info->id       = info.id;
                         file_info->digest   = info.digest;
                         file_info->size     = info.size;
@@ -190,7 +191,7 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
                         }
                     }
 
-                    fdb_files_diff_iterator_free(diff);
+                    fdb_sync_files_diff_iterator_free(diff);
 
                     if (have_diff)
                     {
@@ -201,9 +202,9 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
                 }
 
                 fdb_transaction_commit(&transaction);
-                fdb_files_release(files_map_2);
+                fdb_sync_files_release(files_map_2);
             }
-            fdb_files_release(files_map_1);
+            fdb_sync_files_release(files_map_1);
         }
 
         fdb_transaction_abort(&transaction);
@@ -220,24 +221,24 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
     FS_INFO("UUID %llx%llx sent files list for synchronization", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
 
     bool is_need_sync = false;
-    fdb_files_map_t *files_map;
+    fdb_sync_files_map_t *files_map;
 
     fdb_transaction_t transaction = { 0 };
 
     // Remote node files list (+)
     if (fdb_transaction_start(psync->db, &transaction))
     {
-        files_map = fdb_files(&transaction, &msg->uuid);
+        files_map = fdb_sync_files(&transaction, &msg->uuid);
         if (files_map)
         {
             FS_INFO("Received %u files info", msg->files_num);
 
             for(uint32_t i = 0; i < msg->files_num; ++i)
             {
-                ffile_info_t info;
+                fsync_file_info_t info;
                 fsync_file_info_get(msg->files + i, &info);
 
-                if (!fdb_file_add(files_map, &transaction, &info))
+                if (!fdb_sync_file_add(files_map, &transaction, &info))
                 {
                     FS_ERR("Transaction was aborted");
                     fdb_transaction_abort(&transaction);
@@ -246,7 +247,7 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
             }
 
             fdb_transaction_commit(&transaction);
-            fdb_files_release(files_map);
+            fdb_sync_files_release(files_map);
         }
         else FS_ERR("Files map wasn't opened");
 
@@ -258,10 +259,10 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
     if (fdb_transaction_start(psync->db, &transaction))
     {
         fdb_map_t status_map = { 0 };
-        files_map = fdb_files(&transaction, &psync->uuid);
+        files_map = fdb_sync_files(&transaction, &psync->uuid);
         if (files_map)
         {
-            if (fdb_files_statuses(&transaction, &psync->uuid, &status_map))
+            if (fdb_sync_files_statuses(&transaction, &psync->uuid, &status_map))
             {
                 fmsg_sync_files_list_t files_list;
                 files_list.uuid = psync->uuid;
@@ -269,7 +270,7 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
                 files_list.is_last = false;
                 files_list.files_num = 0;
 
-                ffile_info_t info;
+                fsync_file_info_t info;
 
                 for(uint32_t i = 0; i < msg->files_num; ++i)
                 {
@@ -277,14 +278,14 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
                     info.id = FINVALID_ID;
                     info.status = 0;
 
-                    bool is_absent = fdb_file_add_unique(files_map, &transaction, &info);
+                    bool is_absent = fdb_sync_file_add_unique(files_map, &transaction, &info);
 
                     if (is_absent)
                     {
                         fdb_data_t const file_id = { sizeof info.id, &info.id };
                         fdb_statuses_map_put(&status_map, &transaction, FFILE_IS_EXIST, &file_id);
 
-                        fsync_file_info_t *file_info = &files_list.files[files_list.files_num++];
+                        fmsg_sync_file_info_t *file_info = &files_list.files[files_list.files_num++];
                         file_info->id       = info.id;
                         file_info->digest   = info.digest;
                         file_info->size     = info.size;
@@ -303,7 +304,7 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
                 }
 
                 fdb_transaction_commit(&transaction);
-                fdb_files_release(files_map);
+                fdb_sync_files_release(files_map);
                 fdb_map_close(&status_map);
 
                 if (is_need_sync)
@@ -351,10 +352,10 @@ static void fsync_file_part_request_handler(fsync_t *psync, uint32_t msg_type, f
         fdb_transaction_t transaction = { 0 };
         if (fdb_transaction_start(psync->db, &transaction))
         {
-            fdb_files_map_t *files_map = fdb_files(&transaction, &psync->uuid);
+            fdb_sync_files_map_t *files_map = fdb_sync_files(&transaction, &psync->uuid);
             if (files_map)
             {
-                if (fdb_file_path(files_map, &transaction, msg->id, path + len, sizeof path - len))
+                if (fdb_sync_file_path(files_map, &transaction, msg->id, path + len, sizeof path - len))
                 {
                     int fd = open(path, O_BINARY | O_RDONLY);
                     if (fd != -1)
@@ -382,7 +383,7 @@ static void fsync_file_part_request_handler(fsync_t *psync, uint32_t msg_type, f
                     }
                     else FS_ERR("Unable to open the file: \'%s\'", path);
                 }
-                fdb_files_release(files_map);
+                fdb_sync_files_release(files_map);
             }
             fdb_transaction_abort(&transaction);
         }
@@ -431,7 +432,7 @@ static void *fsync_thread(void *param)
         }
     }
 
-    return false;
+    return 0;
 }
 
 static void *fsync_events_queue_processing_thread(void *param)
@@ -516,13 +517,13 @@ static void *fsync_events_queue_processing_thread(void *param)
 
 static void fsync_scan_dir(fsync_t *psync)
 {
-    fdb_file_del_all(&psync->uuid);
+    fdb_sync_file_del_all(&psync->uuid);
 
     fdb_transaction_t transaction = { 0 };
 
     if (fdb_transaction_start(psync->db, &transaction))
     {
-        fdb_files_map_t *files_map = fdb_files(&transaction, &psync->uuid);
+        fdb_sync_files_map_t *files_map = fdb_sync_files(&transaction, &psync->uuid);
         if (files_map)
         {
             fsiterator_t *it = fsdir_iterator(psync->dir);
@@ -533,7 +534,7 @@ static void fsync_scan_dir(fsync_t *psync)
             {
                 if (entry.type == FS_REG)
                 {
-                    ffile_info_t info = { 0 };
+                    fsync_file_info_t info = { 0 };
                     info.id = FINVALID_ID;
                     info.mod_time = cur_time;
                     info.status = FFILE_IS_EXIST;
@@ -548,10 +549,10 @@ static void fsync_scan_dir(fsync_t *psync)
                             fsdir_iterator_path(it, &entry, info.path, sizeof info.path);
                             fsfile_size(full_path, &info.size);
 
-                            if (!fdb_file_add(files_map, &transaction, &info))
+                            if (!fdb_sync_file_add(files_map, &transaction, &info))
                             {
                                 fdb_transaction_abort(&transaction);
-                                fdb_files_release(files_map);
+                                fdb_sync_files_release(files_map);
                                 files_map = 0;
                                 break;
                             }
@@ -567,7 +568,7 @@ static void fsync_scan_dir(fsync_t *psync)
             {
                 psync->sync_time = time(0);
                 fdb_transaction_commit(&transaction);
-                fdb_files_release(files_map);
+                fdb_sync_files_release(files_map);
             }
         }
     }
@@ -589,6 +590,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t co
     }
     memset(psync, 0, sizeof *psync);
 
+    psync->ref_counter = 1;
     psync->uuid = *uuid;
 
     char *dst = psync->dir;
@@ -603,40 +605,40 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t co
     if (fring_queue_create(psync->events_queue_buf, sizeof psync->events_queue_buf, &psync->events_queue) != FSUCCESS)
     {
         FS_ERR("The file system events queue isn't created");
-        fsync_free(psync);
+        fsync_release(psync);
         return 0;
     }
 
     if (sem_init(&psync->events_queue_sem, 0, 0) == -1)
     {
         FS_ERR("The semaphore initialization is failed");
-        fsync_free(psync);
+        fsync_release(psync);
         return 0;
     }
 
     if (sem_init(&psync->sync_sem, 0, 0) == -1)
     {
         FS_ERR("The semaphore initialization is failed");
-        fsync_free(psync);
+        fsync_release(psync);
         return 0;
     }
 
     psync->dir_listener = fsdir_listener_create();
     if (!psync->dir_listener)
     {
-        fsync_free(psync);
+        fsync_release(psync);
         return 0;
     }
 
     if (!fsdir_listener_reg_handler(psync->dir_listener, fsdir_evt_handler, psync))
     {
-        fsync_free(psync);
+        fsync_release(psync);
         return 0;
     }
 
     if (!fsdir_listener_add_path(psync->dir_listener, psync->dir))
     {
-        fsync_free(psync);
+        fsync_release(psync);
         return 0;
     }
 
@@ -644,7 +646,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t co
     if (rc)
     {
         FS_ERR("Unable to create the thread for directories synchronization. Error: %d", rc);
-        fsync_free(psync);
+        fsync_release(psync);
         return 0;
     }
 
@@ -655,7 +657,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t co
     if (rc)
     {
         FS_ERR("Unable to create the thread for directories synchronization. Error: %d", rc);
-        fsync_free(psync);
+        fsync_release(psync);
         return 0;
     }
 
@@ -671,31 +673,47 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t co
     return psync;
 }
 
-void fsync_free(fsync_t *psync)
+fsync_t *fsync_retain(fsync_t *psync)
+{
+    if (psync)
+        psync->ref_counter++;
+    else
+        FS_ERR("Invalid files synchronizer");
+    return psync;
+}
+
+void fsync_release(fsync_t *psync)
 {
     if (psync)
     {
-        if (psync->is_sync_active)
+        if (!psync->ref_counter)
+            FS_ERR("Invalid files synchronizer");
+        else if (!--psync->ref_counter)
         {
-            psync->is_sync_active = false;
-            sem_post(&psync->sync_sem);
-            pthread_join(psync->sync_thread, 0);
-        }
+            if (psync->is_sync_active)
+            {
+                psync->is_sync_active = false;
+                sem_post(&psync->sync_sem);
+                pthread_join(psync->sync_thread, 0);
+            }
 
-        if (psync->is_events_queue_processing_active)
-        {
-            psync->is_events_queue_processing_active = false;
-            sem_post(&psync->events_queue_sem);
-            pthread_join(psync->events_queue_processing_thread, 0);
-        }
+            if (psync->is_events_queue_processing_active)
+            {
+                psync->is_events_queue_processing_active = false;
+                sem_post(&psync->events_queue_sem);
+                pthread_join(psync->events_queue_processing_thread, 0);
+            }
 
-        fsdir_listener_free(psync->dir_listener);
-        fring_queue_free(psync->events_queue);
-        sem_destroy(&psync->events_queue_sem);
-        sem_destroy(&psync->sync_sem);
-        fsync_msgbus_release(psync);
-        fdb_release(psync->db);
-        memset(psync, 0, sizeof *psync);
-        free(psync);
+            fsdir_listener_free(psync->dir_listener);
+            fring_queue_free(psync->events_queue);
+            sem_destroy(&psync->events_queue_sem);
+            sem_destroy(&psync->sync_sem);
+            fsync_msgbus_release(psync);
+            fdb_release(psync->db);
+            memset(psync, 0, sizeof *psync);
+            free(psync);
+        }
     }
+    else
+        FS_ERR("Invalid files synchronizer");
 }

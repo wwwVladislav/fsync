@@ -87,7 +87,7 @@ bool fvector_push_back(fvector_t **pvector, void const *data)
     return true;
 }
 
-bool fvector_pop_back(fvector_t **pvector, void *data)
+bool fvector_pop_back(fvector_t **pvector)
 {
     if (!pvector || !*pvector)
         return false;
@@ -114,6 +114,22 @@ bool fvector_pop_back(fvector_t **pvector, void *data)
     }
     (*pvector)->size--;
     return true;
+}
+
+bool fvector_erase(fvector_t **pvector, size_t idx)
+{
+    if (!pvector || !*pvector)
+        return false;
+    if (idx >= (*pvector)->size)
+        return false;
+
+    if (idx + 1 < (*pvector)->size)
+    {
+        uint8_t *data = fvector_ptr(*pvector);
+        memmove(data + idx * (*pvector)->item_size, data + (idx + 1) * (*pvector)->item_size, ((*pvector)->size - idx - 1) * (*pvector)->item_size);
+    }
+
+    return fvector_pop_back(pvector);
 }
 
 void fvector_qsort(fvector_t *pvector, int (*compar)(const void *, const void*))

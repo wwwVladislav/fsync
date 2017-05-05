@@ -30,15 +30,15 @@ typedef struct
     fmd5_t   digest;
     uint64_t size;
     bool     is_exist;
-} fsync_file_info_t;
+} fmsg_sync_file_info_t;
 
 typedef struct
 {
-    fuuid_t             uuid;
-    fuuid_t             destination;
-    bool                is_last;
-    uint8_t             files_num;
-    fsync_file_info_t   files[32];
+    fuuid_t                 uuid;
+    fuuid_t                 destination;
+    bool                    is_last;
+    uint8_t                 files_num;
+    fmsg_sync_file_info_t   files[32];
 } fmsg_sync_files_list_t;
 
 typedef struct

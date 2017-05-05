@@ -2,20 +2,22 @@ cmake_minimum_required(VERSION 3.1)
 project(fdb)
 
 set(FDB_HEADERS
-    src/sync/files.h
+    src/sync/sync_files.h
     src/sync/nodes.h
     src/sync/config.h
     src/sync/ids.h
     src/sync/statuses.h
+    src/sync/dirs.h
     src/db.h
 )
 
 set(FDB_SOURCES
-    src/sync/files.c
+    src/sync/sync_files.c
     src/sync/nodes.c
     src/sync/config.c
     src/sync/ids.c
     src/sync/statuses.c
+    src/sync/dirs.c
     src/db.c
 )
 

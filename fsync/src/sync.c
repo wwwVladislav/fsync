@@ -528,41 +528,44 @@ static void fsync_scan_dir(fsync_t *psync)
         {
             fsiterator_t *it = fsdir_iterator(psync->dir);
 
-            time_t const cur_time = time(0);
-
-            for(dirent_t entry; fsdir_iterator_next(it, &entry);)
+            if (it)
             {
-                if (entry.type == FS_REG)
+                time_t const cur_time = time(0);
+
+                for(dirent_t entry; fsdir_iterator_next(it, &entry);)
                 {
-                    fsync_file_info_t info = { 0 };
-                    info.id = FINVALID_ID;
-                    info.mod_time = cur_time;
-                    info.status = FFILE_IS_EXIST;
-
-                    char full_path[FMAX_PATH];
-                    size_t full_path_len = fsdir_iterator_full_path(it, &entry, full_path, sizeof full_path);
-                    if (full_path_len <= sizeof full_path)
+                    if (entry.type == FS_REG)
                     {
-                        if (fsfile_md5sum(full_path, &info.digest))
-                        {
-                            info.status |= FFILE_DIGEST_IS_CALCULATED;
-                            fsdir_iterator_path(it, &entry, info.path, sizeof info.path);
-                            fsfile_size(full_path, &info.size);
+                        fsync_file_info_t info = { 0 };
+                        info.id = FINVALID_ID;
+                        info.mod_time = cur_time;
+                        info.status = FFILE_IS_EXIST;
 
-                            if (!fdb_sync_file_add(files_map, &transaction, &info))
+                        char full_path[FMAX_PATH];
+                        size_t full_path_len = fsdir_iterator_full_path(it, &entry, full_path, sizeof full_path);
+                        if (full_path_len <= sizeof full_path)
+                        {
+                            if (fsfile_md5sum(full_path, &info.digest))
                             {
-                                fdb_transaction_abort(&transaction);
-                                fdb_sync_files_release(files_map);
-                                files_map = 0;
-                                break;
+                                info.status |= FFILE_DIGEST_IS_CALCULATED;
+                                fsdir_iterator_path(it, &entry, info.path, sizeof info.path);
+                                fsfile_size(full_path, &info.size);
+
+                                if (!fdb_sync_file_add(files_map, &transaction, &info))
+                                {
+                                    fdb_transaction_abort(&transaction);
+                                    fdb_sync_files_release(files_map);
+                                    files_map = 0;
+                                    break;
+                                }
                             }
                         }
+                        else
+                            FS_ERR("Full path length of \'%s\' file is too long.", entry.name);
                     }
-                    else
-                        FS_ERR("Full path length of \'%s\' file is too long.", entry.name);
                 }
+                fsdir_iterator_free(it);
             }
-            fsdir_iterator_free(it);
 
             if (files_map)
             {

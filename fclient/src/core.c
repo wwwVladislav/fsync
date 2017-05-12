@@ -27,7 +27,7 @@ struct fcore
     filink_t         *ilink;
     fsync_t          *sync;
     fsearch_engine_t *search_engine;
-    fconfig_t  config;
+    fconfig_t         config;
 };
 
 fcore_t *fcore_start(char const *addr)

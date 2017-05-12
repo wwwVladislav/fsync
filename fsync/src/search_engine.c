@@ -10,6 +10,10 @@
 #include <errno.h>
 #include <time.h>
 
+#ifdef _WIN32
+#include <ctype.h>
+#endif
+
 static struct timespec const F1_SEC = { 1, 0 };
 
 struct search_engine
@@ -22,6 +26,78 @@ struct search_engine
     pthread_t           scan_thread;
     sem_t               sem;
 };
+
+static bool fsearch_engine_get_first_dir(fsearch_engine_t *pengine, fdir_info_t *dir_info, fdir_scan_status_t *scan_status)
+{
+    bool ret = false;
+
+    fdb_transaction_t transaction = { 0 };
+    if (fdb_transaction_start(pengine->db, &transaction))
+    {
+        fdb_dirs_scan_status_t *dir_scan_status = fdb_dirs_scan_status(&transaction);
+        if(dir_scan_status)
+        {
+            if (fdb_dirs_scan_status_get(dir_scan_status, &transaction, scan_status))
+            {
+                fdb_dirs_t *dirs = fdb_dirs(&transaction);
+                if (dirs)
+                {
+                    ret = fdb_dirs_get(dirs, &transaction, scan_status->id, dir_info);
+                    fdb_dirs_release(dirs);
+                } else FS_ERR("Dirs map wasn't opened");
+
+            }
+            fdb_dirs_scan_status_release(dir_scan_status);
+        } else FS_ERR("Statuses map wasn't opened");
+
+        fdb_transaction_abort(&transaction);
+    }
+
+    return ret;
+}
+
+static void fsearch_engine_del_dir_info(fsearch_engine_t *pengine, fdir_info_t *dir_info, fdir_scan_status_t *scan_status)
+{
+    fdb_transaction_t transaction = { 0 };
+    if (fdb_transaction_start(pengine->db, &transaction))
+    {
+        fdb_dirs_scan_status_t *dir_scan_status = fdb_dirs_scan_status(&transaction);
+        if(dir_scan_status)
+        {
+            if (fdb_dirs_scan_status_del(dir_scan_status, &transaction, scan_status))
+                fdb_transaction_commit(&transaction);
+            else FS_ERR("Unable to delete the item from statuses map");
+            fdb_dirs_scan_status_release(dir_scan_status);
+        }
+        else FS_ERR("Statuses map wasn't opened");
+
+        fdb_transaction_abort(&transaction);
+    }
+}
+
+static void fsearch_engine_scan_dir(fsearch_engine_t *pengine, fdir_info_t const *dir_info, fdir_scan_status_t const *scan_status)
+{
+    fsiterator_t *it = fsdir_iterator(dir_info->path);
+    if (it)
+    {
+        fsdir_iterator_seek(it, scan_status->path);
+
+        for(dirent_t entry; pengine->is_active && fsdir_iterator_next(it, &entry);)
+        {
+            if (entry.type == FS_REG)
+            {
+                char path[FMAX_PATH];
+                size_t path_len = fsdir_iterator_path(it, &entry, path, sizeof path);
+                if (path_len <= sizeof path)
+                {
+                    // TODO
+                    printf(">> %s\n", path);
+                }
+            }
+        }
+        fsdir_iterator_free(it);
+    }
+}
 
 static void *fsearch_engine_dirs_scan_thread(void *param)
 {
@@ -36,15 +112,25 @@ static void *fsearch_engine_dirs_scan_thread(void *param)
         if (!pengine->is_active)
             break;
 
-        /*
-        fsynchronizer_t *synchronizer = fsynchronizer_create(psync->msgbus, psync->db, &psync->uuid, psync->dir);
-        if (synchronizer)
+        bool dir_is_valid;
+
+        do
         {
-            while(psync->is_sync_active && fsynchronizer_update(synchronizer));
-            fsynchronizer_free(synchronizer);
+            fdir_scan_status_t scan_status = { 0 };
+            fdir_info_t dir_info = { 0 };
+
+            dir_is_valid = fsearch_engine_get_first_dir(pengine, &dir_info, &scan_status);
+
+            if (!pengine->is_active || !dir_is_valid)
+                break;
+
+            fsearch_engine_scan_dir(pengine, &dir_info, &scan_status);
+
+            if (pengine->is_active)
+                fsearch_engine_del_dir_info(pengine, &dir_info, &scan_status);
         }
-        */
-    }
+        while (pengine->is_active && dir_is_valid);
+    }   // while(is_active)
 
     return 0;
 }
@@ -70,7 +156,7 @@ fsearch_engine_t *fsearch_engine(fmsgbus_t *pmsgbus, fdb_t *db)
     pengine->pmsgbus = fmsgbus_retain(pmsgbus);
     pengine->db = fdb_retain(db);
 
-    if (sem_init(&pengine->sem, 0, 0) == -1)
+    if (sem_init(&pengine->sem, 0, 1) == -1)
     {
         FS_ERR("The semaphore initialization is failed");
         fsearch_engine_release(pengine);
@@ -139,6 +225,22 @@ bool fsearch_engine_add_dir(fsearch_engine_t *pengine, char const *dir)
         return false;
     }
 
+    size_t const path_len = strlen(dir);
+    if (path_len >= FMAX_PATH)
+    {
+        FS_ERR("Path length is too long");
+        return false;
+    }
+
+    #ifdef _WIN32
+    // TODO: path can be utf-8 string
+    char lpath[FMAX_PATH];
+    for(size_t i = 0; i < path_len; ++i)
+        lpath[i] = tolower(dir[i]);
+    lpath[path_len] = 0;
+    dir = lpath;
+    #endif
+
     bool ret = false;
 
     fdb_transaction_t transaction = { 0 };
@@ -147,13 +249,30 @@ bool fsearch_engine_add_dir(fsearch_engine_t *pengine, char const *dir)
         fdb_dirs_t *dirs = fdb_dirs(&transaction);
         if (dirs)
         {
-            ret = fdb_dirs_add(dirs, &transaction, dir, 0);
-            if (ret)
-                fdb_transaction_commit(&transaction);
+            uint32_t id;
+            if (fdb_dirs_add_unique(dirs, &transaction, dir, &id))
+            {
+                fdb_dirs_scan_status_t *dir_scan_status = fdb_dirs_scan_status(&transaction);
+                if(dir_scan_status)
+                {
+                    fdir_scan_status_t scan_status = { id };
+                    strncpy(scan_status.path, dir, sizeof scan_status.path);
+
+                    if (fdb_dirs_scan_status_add(dir_scan_status, &transaction, &scan_status))
+                    {
+                        ret = true;
+                        fdb_transaction_commit(&transaction);
+                    }
+                    fdb_dirs_scan_status_release(dir_scan_status);
+                }
+            } else FS_WARN("Directory isn't unique");
             fdb_dirs_release(dirs);
         }
         fdb_transaction_abort(&transaction);
     }
+
+    if (ret)
+        sem_post(&pengine->sem);
 
     return ret;
 }

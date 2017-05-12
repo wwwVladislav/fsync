@@ -266,6 +266,13 @@ bool fsdir_iterator_next(fsiterator_t *piterator, dirent_t *pentry)
     return false;
 }
 
+bool fsdir_iterator_seek(fsiterator_t *piterator, char const *path)
+{
+    if (!piterator || !path) return false;
+    // TODO
+    return true;
+}
+
 size_t fsdir_iterator_directory(fsiterator_t *piterator, char *path, size_t size)
 {
     return fsget_directory_by_iterator(piterator, 0, path, size, false);

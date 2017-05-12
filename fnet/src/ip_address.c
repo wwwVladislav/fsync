@@ -1,4 +1,5 @@
 #include "ip_address.h"
+#include <fcommon/limits.h>
 #include <futils/log.h>
 #include <string.h>
 #include <stdio.h>
@@ -11,9 +12,15 @@ bool fnet_str2addr(char const *str, fnet_address_t *addr)
         return false;
     }
 
+    size_t const len = strlen(str);
+    if (len > FMAX_ADDR)
+    {
+        FS_ERR("Address length is too long");
+        return false;
+    }
+
     memset(addr, 0, sizeof *addr);
 
-    size_t const len = strlen(str);
     char host[len + 1];
     strncpy(host, str, len + 1);
 

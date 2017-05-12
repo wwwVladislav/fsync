@@ -53,6 +53,7 @@ bool              fsdir_read(fsdir_t *, dirent_t *);
 fsiterator_t     *fsdir_iterator(char const *);
 void              fsdir_iterator_free(fsiterator_t *);
 bool              fsdir_iterator_next(fsiterator_t *, dirent_t *);
+bool              fsdir_iterator_seek(fsiterator_t *, char const *);
 size_t            fsdir_iterator_directory(fsiterator_t *, char *, size_t);
 size_t            fsdir_iterator_path(fsiterator_t *, dirent_t *, char *, size_t);
 size_t            fsdir_iterator_full_path(fsiterator_t *, dirent_t *, char *, size_t);

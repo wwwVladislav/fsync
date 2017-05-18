@@ -381,10 +381,10 @@ static void fsynchronizer_cleanup_ready_files_info(fsynchronizer_t *psynchronize
                     {
                         sync_files = (fsynchronizer_file_t *)fvector_ptr(psynchronizer->sync_files);
                         sync_files_size = fvector_size(psynchronizer->sync_files);
+                        continue;
                     }
-                    else
-                        ++i;
                 }
+                ++i;
             }
 
             fdb_transaction_commit(&transaction);

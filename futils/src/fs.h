@@ -1,7 +1,7 @@
-#ifndef FSUTILS_H_FSYNC
-#define FSUTILS_H_FSYNC
+#ifndef FS_H_FUTILS
+#define FS_H_FUTILS
+#include "md5.h"
 #include <fcommon/limits.h>
-#include <futils/md5.h>
 #include <stdbool.h>
 #include <stddef.h>
 

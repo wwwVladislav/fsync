@@ -25,6 +25,7 @@ void    fcore_stop(fcore_t *pcore);
 bool    fcore_connect(fcore_t *pcore, char const *addr);
 bool    fcore_sync(fcore_t *pcore, char const *dir);
 bool    fcore_index(fcore_t *pcore, char const *dir);
+bool    fcore_find(fcore_t *pcore, char const *file, fuuid_t *uuid);
 
 fcore_nodes_iterator_t *fcore_nodes_iterator(fcore_t *pcore);
 void                    fcore_nodes_iterator_free(fcore_nodes_iterator_t *it);

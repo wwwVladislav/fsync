@@ -11,6 +11,7 @@ static void fhelp()
     printf("  sync path - synchronize directories\n");
     printf("  index path - calculate index for files in directory for search\n"
            "             or shows indexed directories list (if it was called without arg)\n");
+    printf("  find - search file in indexed directories\n");
     printf("  nodes - print nodes list\n");
 }
 
@@ -55,6 +56,21 @@ static void findex(fcore_t *core, char *cmd)
     }
 }
 
+static void ffind(fcore_t *core, char *cmd)
+{
+    for(; *cmd && isspace(*cmd); ++cmd);
+    char *c = cmd;
+    for(; *c && !isspace(*c); ++c);
+    *c = 0;
+    fuuid_t uuid = { 0 };
+    if (fcore_find(core, cmd, &uuid))
+    {
+        char buf[2 * sizeof(fuuid_t) + 1] = { 0 };
+        printf("File \'%s\' is found in %s\n", cmd, fuuid2str(&uuid, buf, sizeof buf));
+    }
+    else printf("File \'%s\' isn\'t found\n", cmd);
+}
+
 static void fnodes(fcore_t *core)
 {
     char buf[2 * sizeof(fuuid_t) + 1] = { 0 };
@@ -77,6 +93,7 @@ static const char CMD_CONNECT[7] = "connect";
 static const char CMD_SYNC[4]    = "sync";
 static const char CMD_INDEX[5]   = "index";
 static const char CMD_NODES[5]   = "nodes";
+static const char CMD_FIND[4]    = "find";
 
 int main(int argc, char **argv)
 {
@@ -98,6 +115,7 @@ int main(int argc, char **argv)
             else if (strncasecmp(cmd, CMD_SYNC, sizeof CMD_SYNC) == 0)          fsync(core, cmd + sizeof CMD_SYNC);
             else if (strncasecmp(cmd, CMD_INDEX, sizeof CMD_INDEX) == 0)        findex(core, cmd + sizeof CMD_INDEX);
             else if (strncasecmp(cmd, CMD_NODES, sizeof CMD_NODES) == 0)        fnodes(core);
+            else if (strncasecmp(cmd, CMD_FIND, sizeof CMD_FIND) == 0)          ffind(core, cmd + sizeof CMD_FIND);
             else                                                                printf("Unknown command\n");
             printf(">");
         }

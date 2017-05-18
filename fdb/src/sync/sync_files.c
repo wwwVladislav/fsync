@@ -6,12 +6,11 @@
 #include <fcommon/limits.h>
 #include <stdlib.h>
 #include <stddef.h>
-#include <pthread.h>
 #include <binn.h>
 
 static char const TBL_SYNC_FILE_INFO[]    = "/sfinfo";
-static char const TBL_SYNC_FILE_ID[]      = "/sfid";
 static char const TBL_SYNC_FILE_PATH_ID[] = "/sfpath->id";
+static char const TBL_SYNC_FILE_ID[]      = "/sfid";
 static char const TBL_SYNC_FILE_STATUS[]  = "/sfstatus";
 
 static char const *fdb_tbl_name(fuuid_t const *uuid, char *buf, size_t size, char const *tbl)
@@ -186,7 +185,7 @@ static bool fdb_file_info_unmarshal(fsync_file_info_t *info, void const *data)
 
 bool fdb_sync_file_add(fdb_sync_files_map_t *files_map, fdb_transaction_t *transaction, fsync_file_info_t *info)
 {
-    if (!transaction || !info)
+    if (!files_map || !transaction || !info)
         return false;
 
     fsync_file_info_t old_info = { 0 };
@@ -218,7 +217,7 @@ bool fdb_sync_file_add(fdb_sync_files_map_t *files_map, fdb_transaction_t *trans
 
 bool fdb_sync_file_add_unique(fdb_sync_files_map_t *files_map, fdb_transaction_t *transaction, fsync_file_info_t *info)
 {
-    if (!transaction || !info || info->id != FINVALID_ID)
+    if (!files_map || !transaction || !info || info->id != FINVALID_ID)
         return false;
 
     uint32_t id = FINVALID_ID;
@@ -249,7 +248,7 @@ bool fdb_sync_file_add_unique(fdb_sync_files_map_t *files_map, fdb_transaction_t
 
 bool fdb_sync_file_del(fdb_sync_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id)
 {
-    if (!transaction)
+    if (!files_map || !transaction)
         return false;
 
     fsync_file_info_t info;
@@ -267,7 +266,7 @@ bool fdb_sync_file_del(fdb_sync_files_map_t *files_map, fdb_transaction_t *trans
 
 bool fdb_sync_file_get(fdb_sync_files_map_t *files_map, fdb_transaction_t *transaction, uint32_t id, fsync_file_info_t *info)
 {
-    if (!transaction || !info)
+    if (!files_map || !transaction || !info)
         return false;
     info->id = id;
     fdb_data_t const file_id = { sizeof id, &id };
@@ -278,7 +277,7 @@ bool fdb_sync_file_get(fdb_sync_files_map_t *files_map, fdb_transaction_t *trans
 
 bool fdb_sync_file_id(fdb_sync_files_map_t *files_map, fdb_transaction_t *transaction, char const *path, size_t const size, uint32_t *id)
 {
-    if (!transaction || !path || !id)
+    if (!files_map || !transaction || !path || !id)
         return false;
     fdb_data_t const file_path = { size, (void*)path };
     fdb_data_t file_id = { 0 };

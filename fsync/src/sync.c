@@ -1,11 +1,11 @@
 #include "sync.h"
-#include "fsutils.h"
 #include "synchronizer.h"
 #include <fcommon/limits.h>
 #include <fcommon/messages.h>
 #include <fdb/sync/sync_files.h>
 #include <fdb/sync/statuses.h>
 #include <fdb/sync/nodes.h>
+#include <futils/fs.h>
 #include <futils/log.h>
 #include <futils/queue.h>
 #define RSYNC_NO_STDIO_INTERFACE

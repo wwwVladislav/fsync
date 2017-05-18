@@ -1,5 +1,5 @@
-#include "fsutils.h"
-#include <futils/log.h>
+#include "fs.h"
+#include "log.h"
 #include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,7 +40,33 @@ static bool fsopendir(fsdir_t *pdir, char const *path, char const *name)
 static void fsclosedir(fsdir_t *pdir)
 {
     if (pdir)
+    {
         closedir(pdir->pdir);
+        pdir->pdir = 0;
+    }
+}
+
+static bool fsseekdir(fsdir_t *pdir, char const *dir_name)
+{
+    if (!pdir || !dir_name)
+        return false;
+
+    struct dirent *ent;
+    size_t const dir_name_len = strlen(dir_name);
+
+    rewinddir(pdir->pdir);
+
+    if (!*dir_name)
+        return false;
+
+    while((ent = readdir(pdir->pdir)))
+    {
+        if (dir_name_len == ent->d_namlen
+            && strncmp(ent->d_name, dir_name, dir_name_len) == 0)
+            return true;
+    }
+
+    return false;
 }
 
 static fsdir_entry_t fsdir_entry_type(unsigned type)
@@ -151,7 +177,7 @@ void fsdir_iterator_free(fsiterator_t *piterator)
     if (piterator)
     {
         for(short i = 0; i < piterator->depth; ++i)
-            closedir(piterator->dirs[i].pdir);
+            fsclosedir(piterator->dirs + i);
         free(piterator);
     }
 }
@@ -177,7 +203,7 @@ static size_t fsget_directory_by_iterator(fsiterator_t *piterator, char *subdir,
             delimiter = '\\';
     }
 
-    for (unsigned short i = 0; i < piterator->depth; ++i)
+    for (unsigned short i = 1; i < piterator->depth; ++i)
     {
         fsdir_t *pdir = &piterator->dirs[i];
 
@@ -269,7 +295,60 @@ bool fsdir_iterator_next(fsiterator_t *piterator, dirent_t *pentry)
 bool fsdir_iterator_seek(fsiterator_t *piterator, char const *path)
 {
     if (!piterator || !path) return false;
-    // TODO
+    if (!piterator->depth) return false;
+
+    unsigned short n = 1;
+
+    for (char const *ch = path, *p = ch; ; ++ch)
+    {
+        if (*ch != '/' && *ch != '\\' && *ch)
+            continue;
+
+        char dir_name[FMAX_PATH];
+        size_t dir_name_len = ch - p;
+        if (dir_name_len >= sizeof dir_name)
+        {
+            FS_ERR("Directory name is too long");
+            return false;
+        }
+        strncpy(dir_name, p, dir_name_len);
+        dir_name[dir_name_len] = 0;
+
+        if (n < piterator->depth)
+        {
+            if (dir_name_len && strncmp(dir_name, piterator->dirs[n].name, dir_name_len) == 0)
+            {
+                p = ch + 1;
+                ++n;
+                if (!*ch) break;
+                continue;
+            }
+            else
+            {
+                for (unsigned short i = n; i < piterator->depth; ++i)
+                    fsclosedir(&piterator->dirs[i]);
+                piterator->depth = n;
+            }
+        }
+
+        char path[FMAX_PATH];
+        size_t len = fsget_directory_by_iterator(piterator, dir_name, path, sizeof path, true);
+        if (len >= sizeof path)
+        {
+            FS_ERR("Directory name is too long");
+            return false;
+        }
+
+        if (fsseekdir(&piterator->dirs[piterator->depth - 1], dir_name)
+            && fsopendir(&piterator->dirs[piterator->depth], path, dir_name))
+            piterator->depth++;
+
+        if (!*ch) break;
+
+        p = ch + 1;
+        ++n;
+    }
+
     return true;
 }
 
@@ -348,4 +427,3 @@ bool fsfile_size(char const *path, uint64_t *size)
     *size = st.st_size;
     return true;
 }
-

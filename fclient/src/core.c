@@ -10,6 +10,7 @@
 #include <fdb/sync/config.h>
 #include <fdb/sync/nodes.h>
 #include <fdb/sync/dirs.h>
+#include <fdb/sync/files.h>
 
 static char const *FDB_DATA_SOURCE = "data";
 
@@ -84,7 +85,7 @@ fcore_t *fcore_start(char const *addr)
         return 0;
     }
 
-    pcore->search_engine = fsearch_engine(pcore->msgbus, pcore->db);
+    pcore->search_engine = fsearch_engine(pcore->msgbus, pcore->db, &pcore->config.uuid);
     if (!pcore->search_engine)
     {
         fcore_stop(pcore);
@@ -154,6 +155,33 @@ bool fcore_index(fcore_t *pcore, char const *dir)
     }
 
     return fsearch_engine_add_dir(pcore->search_engine, dir);
+}
+
+bool fcore_find(fcore_t *pcore, char const *file, fuuid_t *uuid)
+{
+    if (!pcore || !file || !uuid)
+    {
+        FS_ERR("Invalid argument");
+        return false;
+    }
+
+    bool ret = false;
+
+    fdb_transaction_t transaction = { 0 };
+    if (fdb_transaction_start(pcore->db, &transaction))
+    {
+        fdb_files_t *files = fdb_files(&transaction, &pcore->config.uuid);
+        if (files)
+        {
+            ret = fdb_files_find(files, &transaction, file);
+            if (ret)
+                *uuid = pcore->config.uuid;
+            fdb_files_release(files);
+        }
+        fdb_transaction_abort(&transaction);
+    }
+
+    return ret;
 }
 
 struct fcore_nodes_iterator

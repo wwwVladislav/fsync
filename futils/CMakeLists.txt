@@ -11,6 +11,7 @@ set(FUTILS_HEADERS
     src/static_allocator.h
     src/static_assert.h
     src/msgbus.h
+    src/fs.h
 )
 
 set(FUTILS_SOURCES
@@ -20,6 +21,7 @@ set(FUTILS_SOURCES
     src/vector.c
     src/static_allocator.c
     src/msgbus.c
+    src/fs.c
 )
 
 find_package(OpenSSL REQUIRED)
@@ -32,6 +34,7 @@ if (WIN32)
     set(FUTILS_SOURCES
         ${FUTILS_SOURCES}
         src/os/windows/uuid.c
+        src/os/windows/fs.c
     )
 
     set(FUTILS_LIBS
@@ -42,6 +45,7 @@ endif (WIN32)
 
 include_directories(
     ${OPENSSL_INCLUDE_DIR}
+    ../fcommon/include
 )
 
 use_c99()

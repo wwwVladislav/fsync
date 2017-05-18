@@ -1,5 +1,5 @@
-#include "../../fsutils.h"
-#include <futils/log.h>
+#include "../../fs.h"
+#include "../../log.h"
 
 #ifndef _WIN32_WINNT
 #   define WIN32_LEAN_AND_MEAN

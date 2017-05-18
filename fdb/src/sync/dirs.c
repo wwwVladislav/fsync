@@ -227,7 +227,7 @@ bool fdb_dirs_iterator_first(fdb_dirs_iterator_t *piterator, fdir_info_t *info)
         return false;
 
     info->id = *(uint32_t*)dir_id.data;
-    strncpy(info->path, (char const *)dir_path.data, sizeof info->path);
+    strncpy(info->path, (char const *)dir_path.data, sizeof info->path < dir_path.size ? sizeof info->path : dir_path.size);
 
     return true;
 }
@@ -244,7 +244,7 @@ bool fdb_dirs_iterator_next(fdb_dirs_iterator_t *piterator, fdir_info_t *info)
         return false;
 
     info->id = *(uint32_t*)dir_id.data;
-    strncpy(info->path, (char const *)dir_path.data, sizeof info->path);
+    strncpy(info->path, (char const *)dir_path.data, sizeof info->path < dir_path.size ? sizeof info->path : dir_path.size);
 
     return true;
 }
@@ -392,4 +392,10 @@ bool fdb_dirs_scan_status_del(fdb_dirs_scan_status_t *pdirs, fdb_transaction_t *
     }
 
     return ret;
+}
+
+bool fdb_dirs_scan_status_update(fdb_dirs_scan_status_t *pdirs, fdb_transaction_t *transaction, fdir_scan_status_t const *scan_status, fdir_scan_status_t const *new_scan_status)
+{
+    return fdb_dirs_scan_status_del(pdirs, transaction, scan_status)
+           && fdb_dirs_scan_status_add(pdirs, transaction, new_scan_status);
 }

@@ -36,5 +36,6 @@ void                    fdb_dirs_scan_status_release(fdb_dirs_scan_status_t *pdi
 bool                    fdb_dirs_scan_status_add(fdb_dirs_scan_status_t *pdirs, fdb_transaction_t *transaction, fdir_scan_status_t const *scan_status);
 bool                    fdb_dirs_scan_status_get(fdb_dirs_scan_status_t *pdirs, fdb_transaction_t *transaction, fdir_scan_status_t *scan_status);
 bool                    fdb_dirs_scan_status_del(fdb_dirs_scan_status_t *pdirs, fdb_transaction_t *transaction, fdir_scan_status_t const *scan_status);
+bool                    fdb_dirs_scan_status_update(fdb_dirs_scan_status_t *pdirs, fdb_transaction_t *transaction, fdir_scan_status_t const *scan_status, fdir_scan_status_t const *new_scan_status);
 
 #endif

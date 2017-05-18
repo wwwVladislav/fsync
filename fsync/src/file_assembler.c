@@ -1,5 +1,5 @@
 #include "file_assembler.h"
-#include "fsutils.h"
+#include <futils/fs.h>
 #include <futils/log.h>
 #include <fcommon/limits.h>
 #include <stdio.h>

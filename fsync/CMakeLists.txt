@@ -3,7 +3,6 @@ project(fsync)
 
 set(FSYNC_HEADERS
     src/device.h
-    src/fsutils.h
     src/sync.h
     src/synchronizer.h
     src/file_assembler.h
@@ -11,7 +10,6 @@ set(FSYNC_HEADERS
 )
 
 set(FSYNC_SOURCES
-    src/fsutils.c
     src/sync.c
     src/synchronizer.c
     src/file_assembler.c
@@ -21,7 +19,6 @@ set(FSYNC_SOURCES
 set(FSYNC_SOURCES
     ${FSYNC_SOURCES}
     src/os/windows/device.c
-    src/os/windows/win_fsutils.c
 )
 
 find_package(LIBRSYNC REQUIRED)

@@ -3,14 +3,14 @@ project(fsync)
 
 set(FSYNC_HEADERS
     src/device.h
-    src/sync.h
+    src/fsync.h
     src/synchronizer.h
     src/file_assembler.h
     src/search_engine.h
 )
 
 set(FSYNC_SOURCES
-    src/sync.c
+    src/fsync.c
     src/synchronizer.c
     src/file_assembler.c
     src/search_engine.c

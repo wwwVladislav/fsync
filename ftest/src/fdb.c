@@ -18,9 +18,9 @@ static void fbd_simple_test()
             {
                 // Insert data
                 fdb_data_t data[][2] = {
-                    { { 5, "Hello" },   { 5, "World" } },
-                    { { 6, "Hello!" },  { 6, "World!" } },
-                    { { 7, "Hello!!" }, { 7, "World!!" } }
+                    { { 8, "2 Hello!" },  { 6, "World!" } },
+                    { { 7, "3 Hello" },   { 5, "World" } },
+                    { { 9, "1 Hello!!" }, { 7, "World!!" } }
                 };
                 for(int i = 0; i < sizeof data / sizeof data[0]; ++i)
                     fdb_map_put(&map, &transaction, data[i], data[i] + 1);

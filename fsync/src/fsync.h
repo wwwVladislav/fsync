@@ -1,5 +1,5 @@
-#ifndef SYNC_H_FSYNC
-#define SYNC_H_FSYNC
+#ifndef FSYNC_H_FSYNC
+#define FSYNC_H_FSYNC
 #include <futils/uuid.h>
 #include <futils/msgbus.h>
 #include <fdb/db.h>

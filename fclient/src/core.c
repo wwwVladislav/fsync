@@ -5,7 +5,7 @@
 #include <futils/uuid.h>
 #include <futils/msgbus.h>
 #include <filink/interface.h>
-#include <fsync/sync.h>
+#include <fsync/fsync.h>
 #include <fsync/search_engine.h>
 #include <fdb/sync/config.h>
 #include <fdb/sync/nodes.h>

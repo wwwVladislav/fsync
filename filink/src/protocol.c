@@ -64,12 +64,6 @@ FPROTO_DESC_TABLE(FPROTO_SYNC_FILES_LIST)
     { FPROTO_FIELD_NULL,   0,                               0,                                             0 }
 };
 
-FPROTO_DESC_TABLE(FPROTO_FILE_PATH)
-{
-    { FPROTO_FIELD_STRING, sizeof(char), 0, FPROTO_MAX_PATH },
-    { FPROTO_FIELD_NULL,   0,            0, 0 }
-};
-
 FPROTO_DESC_TABLE(FPROTO_FILE_PART_REQUEST)
 {
     { FPROTO_FIELD_UUID,   sizeof(fuuid_t),  offsetof(fproto_file_part_request_t, uuid),         1 },

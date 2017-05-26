@@ -4,6 +4,7 @@ project(fsync)
 set(FSYNC_HEADERS
     src/device.h
     src/fsync.h
+    src/rsync.h
     src/synchronizer.h
     src/file_assembler.h
     src/search_engine.h
@@ -11,6 +12,7 @@ set(FSYNC_HEADERS
 
 set(FSYNC_SOURCES
     src/fsync.c
+    src/rsync.c
     src/synchronizer.c
     src/file_assembler.c
     src/search_engine.c

@@ -17,7 +17,6 @@
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
-#include <stdio.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -77,10 +76,13 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
 {
     (void)size;
     (void)msg_type;
+
     if (memcmp(&msg->uuid, &psync->uuid, sizeof psync->uuid) == 0)
         return;
+    if ((msg->status & FSTATUS_R4S_DIRS) == 0)
+        return;
 
-    FS_INFO("UUID %llx%llx is ready for sync", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
+    FS_INFO("UUID %llx%llx is ready for directories synchronization", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
 
     fdb_transaction_t transaction = { 0 };
 
@@ -413,7 +415,7 @@ static void *fsync_thread(void *param)
 
     while(psync->is_sync_active)
     {
-        printf("Wait\n");
+        FS_INFO("Wait");
 
         struct timespec tm = { time(0) + FSYNC_BLOCK_REQ_TIMEOUT, 0 };
         while(psync->is_sync_active && sem_timedwait(&psync->sync_sem, &tm) == -1 && errno == EINTR)
@@ -422,7 +424,7 @@ static void *fsync_thread(void *param)
         if (!psync->is_sync_active)
             break;
 
-        printf("Synchronization...\n");
+        FS_INFO("Synchronization...\n");
 
         fsynchronizer_t *synchronizer = fsynchronizer_create(psync->msgbus, psync->db, &psync->uuid, psync->dir);
         if (synchronizer)
@@ -669,7 +671,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t co
     while(!psync->is_events_queue_processing_active)
         nanosleep(&F1_SEC, NULL);
 
-    fmsg_node_status_t const status = { *uuid, FSTATUS_READY4SYNC };
+    fmsg_node_status_t const status = { *uuid, FSTATUS_R4S_DIRS };
     if (fmsgbus_publish(psync->msgbus, FNODE_STATUS, &status, sizeof status) != FSUCCESS)
         FS_ERR("Node status not published");
 

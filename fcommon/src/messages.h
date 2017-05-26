@@ -14,7 +14,8 @@ typedef enum
 
 enum
 {
-    FSTATUS_READY4SYNC  = 1 << 0    // Node is ready for files synchronization
+    FSTATUS_R4S_DIRS    = 1 << 0,   // Node is ready for directories synchronization
+    FSTATUS_R4S_FILES   = 1 << 1    // Node is ready for files synchronization
 };
 
 typedef struct

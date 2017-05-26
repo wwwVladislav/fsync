@@ -44,14 +44,14 @@ struct filink
 static uint32_t filink_status_to_proto(uint32_t status)
 {
     uint32_t ret = 0;
-    if (status & FSTATUS_READY4SYNC)    ret |= FPROTO_STATUS_READY4SYNC;
+    if (status & FSTATUS_R4S_DIRS)    ret |= FPROTO_STATUS_READY4SYNC;
     return ret;
 }
 
 static uint32_t filink_status_from_proto(uint32_t status)
 {
     uint32_t ret = 0;
-    if (status & FPROTO_STATUS_READY4SYNC)    ret |= FSTATUS_READY4SYNC;
+    if (status & FPROTO_STATUS_READY4SYNC)    ret |= FSTATUS_R4S_DIRS;
     return ret;
 }
 

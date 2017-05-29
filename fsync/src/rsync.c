@@ -16,22 +16,106 @@ enum
     FRBUF_SIZE = 8 * 1024
 };
 
-/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-// Signature calculation
-/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-struct frsync_sig_calculator
+typedef struct
 {
-    volatile uint32_t   ref_counter;
     rs_job_t           *job;
     uint32_t            in_size;
     char                in_buf[FRBUF_SIZE];
     uint32_t            out_size;
     char                out_buf[FRBUF_SIZE];
+} frsync_iojob_t;
+
+static ferr_t frsync_iojob_do(frsync_iojob_t *io_job, fistream_t *pistream, fostream_t *postream)
+{
+    uint32_t rsize = 0;
+
+    do
+    {
+        size_t const read_size = sizeof io_job->in_buf - io_job->in_size;
+        rsize = pistream->read(pistream, io_job->in_buf + io_job->in_size, read_size);
+        io_job->in_size += rsize;
+
+        rs_buffers_t buf = { 0 };
+        buf.next_in = io_job->in_buf;
+        buf.avail_in = io_job->in_size;
+        buf.eof_in = rsize < read_size || rsize == 0;
+        buf.next_out = io_job->out_buf;
+        buf.avail_out = sizeof io_job->out_buf;
+
+        rs_result result = rs_job_iter(io_job->job, &buf);
+
+        if (result != RS_INPUT_ENDED
+            && result != RS_BLOCKED
+            && result != RS_DONE)
+            return FFAIL;
+
+        size_t sig_size = buf.next_out - io_job->out_buf;
+        while(sig_size)
+        {
+            uint32_t write_size = postream->write(postream, io_job->out_buf, sig_size);
+            if (!write_size)
+                return FFAIL;
+            sig_size -= write_size;
+        }
+
+        if (buf.avail_in)
+            memmove(io_job->in_buf, io_job->in_buf + io_job->in_size - buf.avail_in, buf.avail_in);
+        io_job->in_size = buf.avail_in;
+    }
+    while (rsize);
+
+    return FSUCCESS;
+}
+
+typedef struct
+{
+    rs_job_t           *job;
+    uint32_t            in_size;
+    char                in_buf[FRBUF_SIZE];
+} frsync_ijob_t;
+
+static ferr_t frsync_ijob_do(frsync_ijob_t *i_job, fistream_t *pistream)
+{
+    uint32_t rsize = 0;
+
+    do
+    {
+        size_t const read_size = sizeof i_job->in_buf - i_job->in_size;
+        rsize = pistream->read(pistream, i_job->in_buf + i_job->in_size, read_size);
+        i_job->in_size += rsize;
+
+        rs_buffers_t buf = { 0 };
+        buf.next_in = i_job->in_buf;
+        buf.avail_in = i_job->in_size;
+        buf.eof_in = rsize < read_size || rsize == 0;
+
+        rs_result result = rs_job_iter(i_job->job, &buf);
+
+        if (result != RS_BLOCKED
+            && result != RS_DONE)
+            return FFAIL;
+
+        if (buf.avail_in)
+            memmove(i_job->in_buf, i_job->in_buf + i_job->in_size - buf.avail_in, buf.avail_in);
+        i_job->in_size = buf.avail_in;
+    }
+    while (rsize);
+
+    return FSUCCESS;
+}
+
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+// Signature calculation
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+struct frsync_signature_calculator
+{
+    volatile uint32_t   ref_counter;
+    frsync_iojob_t      io_job;
 };
 
-frsync_sig_calculator_t *frsync_sig_calculator_create()
+frsync_signature_calculator_t *frsync_signature_calculator_create()
 {
-    frsync_sig_calculator_t *psig = malloc(sizeof(frsync_sig_calculator_t));
+    frsync_signature_calculator_t *psig = malloc(sizeof(frsync_signature_calculator_t));
     if (!psig)
     {
         FS_ERR("Unable to allocate memory for signature calculator");
@@ -41,19 +125,19 @@ frsync_sig_calculator_t *frsync_sig_calculator_create()
 
     psig->ref_counter = 1;
 
-    psig->job = rs_sig_begin(RS_DEFAULT_BLOCK_LEN, 0, RS_BLAKE2_SIG_MAGIC);
+    psig->io_job.job = rs_sig_begin(RS_DEFAULT_BLOCK_LEN, 0, RS_BLAKE2_SIG_MAGIC);
 
-    if (!psig->job)
+    if (!psig->io_job.job)
     {
         FS_ERR("Unable to create job for signature calculation");
-        frsync_sig_calculator_release(psig);
+        frsync_signature_calculator_release(psig);
         return 0;
     }
 
     return psig;
 }
 
-frsync_sig_calculator_t *frsync_sig_calculator_retain(frsync_sig_calculator_t *psig)
+frsync_signature_calculator_t *frsync_signature_calculator_retain(frsync_signature_calculator_t *psig)
 {
     if (psig)
         psig->ref_counter++;
@@ -62,7 +146,7 @@ frsync_sig_calculator_t *frsync_sig_calculator_retain(frsync_sig_calculator_t *p
     return psig;
 }
 
-void frsync_sig_calculator_release(frsync_sig_calculator_t *psig)
+void frsync_signature_calculator_release(frsync_signature_calculator_t *psig)
 {
     if (psig)
     {
@@ -70,8 +154,8 @@ void frsync_sig_calculator_release(frsync_sig_calculator_t *psig)
             FS_ERR("Invalid signature calculator");
         else if (!--psig->ref_counter)
         {
-            if (psig->job)
-                rs_job_free(psig->job);
+            if (psig->io_job.job)
+                rs_job_free(psig->io_job.job);
             memset(psig, 0, sizeof *psig);
             free(psig);
         }
@@ -80,50 +164,15 @@ void frsync_sig_calculator_release(frsync_sig_calculator_t *psig)
         FS_ERR("Invalid signature calculator");
 }
 
-ferr_t frsync_sig_calculate(frsync_sig_calculator_t *psig, void *pstream, frsync_read_fn_t read, frsync_write_fn_t write)
+ferr_t frsync_signature_calculate(frsync_signature_calculator_t *psig, fistream_t *pbase_stream, fostream_t *psignature_ostream)
 {
-    if (!psig || !read || !write)
+    if (!psig || !pbase_stream || !psignature_ostream)
     {
         FS_ERR("Invalid arguments");
         return FERR_INVALID_ARG;
     }
 
-    uint32_t rsize = 0;
-
-    do
-    {
-        rsize = read(psig, psig->in_buf + psig->in_size, sizeof psig->in_buf - psig->in_size);
-        psig->in_size += rsize;
-
-        rs_buffers_t buf = { 0 };
-        buf.next_in = psig->in_buf;
-        buf.avail_in = psig->in_size;
-        buf.eof_in = rsize == 0;
-        buf.next_out = psig->out_buf;
-        buf.avail_out = sizeof psig->out_buf;
-
-        rs_result result = rs_job_iter(psig->job, &buf);
-
-        if (result != RS_BLOCKED
-            && result != RS_DONE)
-            return FFAIL;
-
-        size_t sig_size = buf.next_out - psig->out_buf;
-        while(sig_size)
-        {
-            uint32_t write_size = write(pstream, psig->out_buf, sig_size);
-            if (!write_size)
-                return FFAIL;
-            sig_size -= write_size;
-        }
-
-        if (buf.avail_in)
-            memmove(psig->in_buf, psig->in_buf + psig->in_size - buf.avail_in, buf.avail_in);
-        psig->in_size = buf.avail_in;
-    }
-    while (rsize);
-
-    return FSUCCESS;
+    return frsync_iojob_do(&psig->io_job, pbase_stream, psignature_ostream);
 }
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
@@ -132,11 +181,9 @@ ferr_t frsync_sig_calculate(frsync_sig_calculator_t *psig, void *pstream, frsync
 struct frsync_signature
 {
     volatile uint32_t   ref_counter;
-    rs_job_t           *job;
     rs_signature_t     *sumset;
     bool                is_ready;
-    uint32_t            in_size;
-    char                in_buf[FRBUF_SIZE];
+    frsync_ijob_t       ijob;
 };
 
 frsync_signature_t *frsync_signature_create()
@@ -151,9 +198,9 @@ frsync_signature_t *frsync_signature_create()
 
     psig->ref_counter = 1;
 
-    psig->job = rs_loadsig_begin(&psig->sumset);
+    psig->ijob.job = rs_loadsig_begin(&psig->sumset);
 
-    if (!psig->job)
+    if (!psig->ijob.job)
     {
         FS_ERR("Unable to create job for signature calculation");
         frsync_signature_release(psig);
@@ -180,8 +227,8 @@ void frsync_signature_release(frsync_signature_t *psig)
             FS_ERR("Invalid signature");
         else if (!--psig->ref_counter)
         {
-            if (psig->job)
-                rs_job_free(psig->job);
+            if (psig->ijob.job)
+                rs_job_free(psig->ijob.job);
             if (psig->sumset)
                 rs_free_sumset(psig->sumset);
             memset(psig, 0, sizeof *psig);
@@ -192,9 +239,9 @@ void frsync_signature_release(frsync_signature_t *psig)
         FS_ERR("Invalid signature");
 }
 
-ferr_t frsync_signature_load(frsync_signature_t *psig, void *pstream, frsync_read_fn_t read)
+ferr_t frsync_signature_load(frsync_signature_t *psig, fistream_t *psignature_istream)
 {
-    if (!psig || !read)
+    if (!psig || !psignature_istream)
     {
         FS_ERR("Invalid arguments");
         return FERR_INVALID_ARG;
@@ -203,85 +250,177 @@ ferr_t frsync_signature_load(frsync_signature_t *psig, void *pstream, frsync_rea
     if (psig->is_ready)
         return FSUCCESS;
 
-    uint32_t rsize = 0;
+    if (frsync_ijob_do(&psig->ijob, psignature_istream) == FSUCCESS)
+        psig->is_ready = rs_build_hash_table(psig->sumset) == RS_DONE;
 
-    do
-    {
-        rsize = read(psig, psig->in_buf + psig->in_size, sizeof psig->in_buf - psig->in_size);
-        psig->in_size += rsize;
-
-        rs_buffers_t buf = { 0 };
-        buf.next_in = psig->in_buf;
-        buf.avail_in = psig->in_size;
-        buf.eof_in = rsize == 0;
-
-        rs_result result = rs_job_iter(psig->job, &buf);
-
-        if (result != RS_BLOCKED
-            && result != RS_DONE)
-            return FFAIL;
-
-        if (buf.avail_in)
-            memmove(psig->in_buf, psig->in_buf + psig->in_size - buf.avail_in, buf.avail_in);
-        psig->in_size = buf.avail_in;
-    }
-    while (rsize);
-
-    return rs_build_hash_table(psig->sumset) == RS_DONE ? FSUCCESS : FFAIL;
+    return psig->is_ready ? FSUCCESS : FFAIL;
 }
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-// Delta creation
+// Delta calculation
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+struct frsync_delta_calculator
+{
+    volatile uint32_t   ref_counter;
+    frsync_signature_t *psig;
+    frsync_iojob_t      io_job;
+};
+
+frsync_delta_calculator_t *frsync_delta_calculator_create(frsync_signature_t *psig)
+{
+    frsync_delta_calculator_t *pdelta = malloc(sizeof(frsync_delta_calculator_t));
+    if (!pdelta)
+    {
+        FS_ERR("Unable to allocate memory for delta calculator");
+        return 0;
+    }
+    memset(pdelta, 0, sizeof *pdelta);
+
+    pdelta->ref_counter = 1;
+    pdelta->psig = frsync_signature_retain(psig);
+
+    pdelta->io_job.job = rs_delta_begin(psig->sumset);
+
+    if (!pdelta->io_job.job)
+    {
+        FS_ERR("Unable to create job for delta calculation");
+        frsync_delta_calculator_release(pdelta);
+        return 0;
+    }
+
+    return pdelta;
+}
+
+frsync_delta_calculator_t *frsync_delta_calculator_retain(frsync_delta_calculator_t *pdelta)
+{
+    if (pdelta)
+        pdelta->ref_counter++;
+    else
+        FS_ERR("Invalid delta calculator");
+    return pdelta;
+}
+
+void frsync_delta_calculator_release(frsync_delta_calculator_t *pdelta)
+{
+    if (pdelta)
+    {
+        if (!pdelta->ref_counter)
+            FS_ERR("Invalid delta calculator");
+        else if (!--pdelta->ref_counter)
+        {
+            if (pdelta->io_job.job)
+                rs_job_free(pdelta->io_job.job);
+            frsync_signature_release(pdelta->psig);
+            memset(pdelta, 0, sizeof *pdelta);
+            free(pdelta);
+        }
+    }
+    else
+        FS_ERR("Invalid delta calculator");
+}
+
+ferr_t frsync_delta_calculate(frsync_delta_calculator_t *pdelta, fistream_t *pistream, fostream_t *pdelta_ostream)
+{
+    if (!pdelta || !pistream || !pdelta_ostream)
+    {
+        FS_ERR("Invalid arguments");
+        return FERR_INVALID_ARG;
+    }
+
+    return frsync_iojob_do(&pdelta->io_job, pistream, pdelta_ostream);
+}
+
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+// Delta apply
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 struct frsync_delta
 {
     volatile uint32_t   ref_counter;
-    rs_job_t           *job;
-    uint32_t            in_size;
-    char                in_buf[FRBUF_SIZE];
-    uint32_t            out_size;
-    char                out_buf[FRBUF_SIZE];
+    fistream_t         *pbase_stream;
+    frsync_iojob_t      io_job;
 };
 
-frsync_delta_t *frsync_delta_create()
+static rs_result frsync_copy_cb(void *arg, rs_long_t pos, size_t *len, void **buf)
 {
-/*
-    frsync_sig_t *psig = malloc(sizeof(frsync_sig_t));
-    if (!psig)
+    fistream_t *pbase_stream = (fistream_t *)arg;
+
+    if (!pbase_stream->seek(pbase_stream, pos))
+        return RS_IO_ERROR;
+
+    size_t const read_size = pbase_stream->read(pbase_stream, *buf, *len);
+    if (!read_size)
     {
-        FS_ERR("Unable to allocate memory for signature calculator");
-        return 0;
-    }
-    memset(psig, 0, sizeof *psig);
-
-    psig->ref_counter = 1;
-
-    psig->job = rs_delta_begin(...);
-
-    if (!psig->job)
-    {
-        FS_ERR("Unable to create job for signature calculation");
-        frsync_sig_release(psig);
-        return 0;
+        *len = 0;
+        return RS_INPUT_ENDED;
     }
 
-    return psig;
-*/
+    *len = read_size;
+
+    return RS_DONE;
 }
 
-frsync_delta_t *frsync_delta_retain(frsync_delta_t *psig)
+frsync_delta_t *frsync_delta_create(fistream_t *pbase_stream)
 {
-    
+    frsync_delta_t *pdelta = malloc(sizeof(frsync_delta_t));
+    if (!pdelta)
+    {
+        FS_ERR("Unable to allocate memory for delta");
+        return 0;
+    }
+    memset(pdelta, 0, sizeof *pdelta);
+
+    pdelta->ref_counter = 1;
+    pdelta->pbase_stream = pbase_stream->retain(pbase_stream);
+
+    pdelta->io_job.job = rs_patch_begin(frsync_copy_cb, pbase_stream);
+
+    if (!pdelta->io_job.job)
+    {
+        FS_ERR("Unable to create job for delta");
+        frsync_delta_release(pdelta);
+        return 0;
+    }
+
+    return pdelta;
 }
 
-void frsync_delta_release(frsync_delta_t *psig)
+frsync_delta_t *frsync_delta_retain(frsync_delta_t *pdelta)
 {
-    
+    if (pdelta)
+        pdelta->ref_counter++;
+    else
+        FS_ERR("Invalid delta");
+    return pdelta;
 }
 
-ferr_t frsync_delta_calc(frsync_delta_t *psig, void *pstream, frsync_read_fn_t read, frsync_write_fn_t write)
+void frsync_delta_release(frsync_delta_t *pdelta)
 {
-    
+    if (pdelta)
+    {
+        if (!pdelta->ref_counter)
+            FS_ERR("Invalid delta");
+        else if (!--pdelta->ref_counter)
+        {
+            if (pdelta->io_job.job)
+                rs_job_free(pdelta->io_job.job);
+            pdelta->pbase_stream->release(pdelta->pbase_stream);
+            memset(pdelta, 0, sizeof *pdelta);
+            free(pdelta);
+        }
+    }
+    else
+        FS_ERR("Invalid delta");
+}
+
+ferr_t frsync_delta_apply(frsync_delta_t *pdelta, fistream_t *pdelta_istream, fostream_t *pnew_ostream)
+{
+    if (!pdelta || !pdelta_istream || !pnew_ostream)
+    {
+        FS_ERR("Invalid arguments");
+        return FERR_INVALID_ARG;
+    }
+
+    return frsync_iojob_do(&pdelta->io_job, pdelta_istream, pnew_ostream);
 }
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/

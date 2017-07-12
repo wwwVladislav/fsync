@@ -429,44 +429,29 @@ ferr_t frsync_delta_apply(frsync_delta_t *pdelta, fistream_t *pdelta_istream, fo
 struct frsync
 {
     volatile uint32_t   ref_counter;
-    fmsgbus_t          *msgbus;
-
-    volatile bool       is_sync_active;
-    pthread_t           sync_thread;
-    sem_t               sync_sem;
+    fistream_t         *src;
+    fostream_t         *dst;
 };
 
-static void *frsync_thread(void *param)
-{
-    frsync_t *psync = (frsync_t*)param;
-    psync->is_sync_active = true;
-
-    while(psync->is_sync_active)
-    {
-    }
-
-    return 0;
-}
-
-static void frsync_msgbus_retain(frsync_t *psync, fmsgbus_t *pmsgbus)
-{
-    psync->msgbus = fmsgbus_retain(pmsgbus);
+//static void frsync_msgbus_retain(frsync_t *psync, fmsgbus_t *pmsgbus)
+//{
+//    psync->msgbus = fmsgbus_retain(pmsgbus);
 //    fmsgbus_subscribe(psync->msgbus, FNODE_STATUS,          (fmsg_handler_t)fsync_status_handler,            psync);
 //    fmsgbus_subscribe(psync->msgbus, FSYNC_FILES_LIST,      (fmsg_handler_t)fsync_sync_files_list_handler,   psync);
 //    fmsgbus_subscribe(psync->msgbus, FFILE_PART_REQUEST,    (fmsg_handler_t)fsync_file_part_request_handler, psync);
-}
+//}
 
-static void frsync_msgbus_release(frsync_t *psync)
-{
+//static void frsync_msgbus_release(frsync_t *psync)
+//{
 //    fmsgbus_unsubscribe(psync->msgbus, FNODE_STATUS,        (fmsg_handler_t)fsync_status_handler);
 //    fmsgbus_unsubscribe(psync->msgbus, FSYNC_FILES_LIST,    (fmsg_handler_t)fsync_sync_files_list_handler);
 //    fmsgbus_unsubscribe(psync->msgbus, FFILE_PART_REQUEST,  (fmsg_handler_t)fsync_file_part_request_handler);
-    fmsgbus_release(psync->msgbus);
-}
+//    fmsgbus_release(psync->msgbus);
+//}
 
-frsync_t *frsync_create(fmsgbus_t *pmsgbus)
+frsync_t *frsync_create(fistream_t *src, fostream_t *dst)
 {
-    if (!pmsgbus)
+    if (!src || !dst)
     {
         FS_ERR("Invalid arguments");
         return 0;
@@ -481,26 +466,8 @@ frsync_t *frsync_create(fmsgbus_t *pmsgbus)
     memset(psync, 0, sizeof *psync);
 
     psync->ref_counter = 1;
-
-    frsync_msgbus_retain(psync, pmsgbus);
-
-    if (sem_init(&psync->sync_sem, 0, 0) == -1)
-    {
-        FS_ERR("The semaphore initialization is failed");
-        frsync_release(psync);
-        return 0;
-    }
-
-    int rc = pthread_create(&psync->sync_thread, 0, frsync_thread, (void*)psync);
-    if (rc)
-    {
-        FS_ERR("Unable to create the thread for rsync. Error: %d", rc);
-        frsync_release(psync);
-        return 0;
-    }
-
-    while(!psync->is_sync_active)
-        nanosleep(&F1_SEC, NULL);
+    psync->src = src->retain(src);
+    psync->dst = dst->retain(dst);
 
     return psync;
 }
@@ -522,19 +489,23 @@ void frsync_release(frsync_t *psync)
             FS_ERR("Invalid files synchronizer");
         else if (!--psync->ref_counter)
         {
-            if (psync->is_sync_active)
-            {
-                psync->is_sync_active = false;
-                sem_post(&psync->sync_sem);
-                pthread_join(psync->sync_thread, 0);
-            }
-
-            sem_destroy(&psync->sync_sem);
-            frsync_msgbus_release(psync);
+            psync->src->release(psync->src);
+            psync->dst->release(psync->dst);
             memset(psync, 0, sizeof *psync);
             free(psync);
         }
     }
     else
         FS_ERR("Invalid rsync");
+}
+
+bool frsync_update(frsync_t *psync)
+{
+    if (!psync)
+    {
+        FS_ERR("Invalid RSYNC client pointer");
+        return false;
+    }
+
+    return true;
 }

@@ -242,6 +242,13 @@ static void frsync_test()
     if (new_data_ostream.size != data_stream.size
         || memcmp(new_data_ostream.data, data_stream.data, data_stream.size) != 0)
         printf("Delta wasn't applied\n");
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    // TODO
+    //frsync_t *prsync = frsync_create(fistream_t *src, fostream_t *dst);
+    //void      frsync_release(frsync_t *psync);
+    //bool      frsync_update(frsync_t *psync);
 }
 
 void fsync_test()

@@ -1,6 +1,5 @@
 #ifndef RSYNC_H_FSYNC
 #define RSYNC_H_FSYNC
-#include <futils/msgbus.h>
 #include <futils/errno.h>
 #include <futils/stream.h>
 #include <stdint.h>
@@ -36,8 +35,9 @@ ferr_t                         frsync_delta_apply(frsync_delta_t *pdelta, fistre
 
 typedef struct frsync frsync_t;
 
-frsync_t *frsync_create(fmsgbus_t *pmsgbus);
+frsync_t *frsync_create(fistream_t *src, fostream_t *dst);
 frsync_t *frsync_retain(frsync_t *psync);
 void      frsync_release(frsync_t *psync);
+bool      frsync_update(frsync_t *psync);
 
 #endif

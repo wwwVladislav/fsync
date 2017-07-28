@@ -32,4 +32,12 @@ struct fostream
     fostream_seek_fn_t    seek;
 };
 
+typedef struct fmem_iostream fmem_iostream_t;
+
+fmem_iostream_t *fmem_iostream          (size_t block_size);
+fmem_iostream_t *fmem_iostream_retain   (fmem_iostream_t *piostream);
+void             fmem_iostream_release  (fmem_iostream_t *piostream);
+fistream_t      *fmem_istream           (fmem_iostream_t *piostream);
+fostream_t      *fmem_ostream           (fmem_iostream_t *piostream);
+
 #endif

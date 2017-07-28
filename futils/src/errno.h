@@ -11,7 +11,8 @@ typedef enum ferr
     FFAIL            = -1,
     FERR_INVALID_ARG = -2,
     FERR_NO_MEM      = -3,
-    FERR_UNKNOWN     = -4
+    FERR_NOT_IMPL    = -4,
+    FERR_UNKNOWN     = -5
 } ferr_t;
 
 #endif

@@ -9,6 +9,7 @@ set(FTEST_SOURCES
     src/fdb.c
     src/fs.c
     src/fsync.c
+    src/futils.c
 )
 
 include_directories(

@@ -12,6 +12,7 @@ set(FUTILS_HEADERS
     src/static_assert.h
     src/msgbus.h
     src/fs.h
+    src/stream.h
 )
 
 set(FUTILS_SOURCES
@@ -22,9 +23,12 @@ set(FUTILS_SOURCES
     src/static_allocator.c
     src/msgbus.c
     src/fs.c
+    src/stream.c
 )
 
 find_package(OpenSSL REQUIRED)
+
+message (STATUS "OPENSSL_INCLUDE_DIR = ${OPENSSL_INCLUDE_DIR}")
 
 set(FUTILS_LIBS
     ${OPENSSL_LIBRARIES}

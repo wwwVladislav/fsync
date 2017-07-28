@@ -426,38 +426,45 @@ ferr_t frsync_delta_apply(frsync_delta_t *pdelta, fistream_t *pdelta_istream, fo
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 // Synchronization algorithm
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-struct frsync
+struct frsync_client
 {
     volatile uint32_t   ref_counter;
+    fmsgbus_t          *msgbus;
+    fuuid_t             dst_uuid;
+    fuuid_t             src_uuid;
     fistream_t         *src;
-    fostream_t         *dst;
 };
 
-//static void frsync_msgbus_retain(frsync_t *psync, fmsgbus_t *pmsgbus)
-//{
-//    psync->msgbus = fmsgbus_retain(pmsgbus);
+struct frsync_server
+{
+    volatile uint32_t   ref_counter;
+};
+
+static void frsync_client_msgbus_retain(frsync_client_t *psync, fmsgbus_t *pmsgbus)
+{
+    psync->msgbus = fmsgbus_retain(pmsgbus);
 //    fmsgbus_subscribe(psync->msgbus, FNODE_STATUS,          (fmsg_handler_t)fsync_status_handler,            psync);
 //    fmsgbus_subscribe(psync->msgbus, FSYNC_FILES_LIST,      (fmsg_handler_t)fsync_sync_files_list_handler,   psync);
 //    fmsgbus_subscribe(psync->msgbus, FFILE_PART_REQUEST,    (fmsg_handler_t)fsync_file_part_request_handler, psync);
-//}
+}
 
-//static void frsync_msgbus_release(frsync_t *psync)
-//{
+static void frsync_client_msgbus_release(frsync_client_t *psync)
+{
 //    fmsgbus_unsubscribe(psync->msgbus, FNODE_STATUS,        (fmsg_handler_t)fsync_status_handler);
 //    fmsgbus_unsubscribe(psync->msgbus, FSYNC_FILES_LIST,    (fmsg_handler_t)fsync_sync_files_list_handler);
 //    fmsgbus_unsubscribe(psync->msgbus, FFILE_PART_REQUEST,  (fmsg_handler_t)fsync_file_part_request_handler);
-//    fmsgbus_release(psync->msgbus);
-//}
+    fmsgbus_release(psync->msgbus);
+}
 
-frsync_t *frsync_create(fistream_t *src, fostream_t *dst)
+frsync_client_t *frsync_client_snd(fmsgbus_t *pmsgbus, frsync_src_t *src, fuuid_t const *dst)
 {
-    if (!src || !dst)
+    if (!pmsgbus || !src || !dst)
     {
         FS_ERR("Invalid arguments");
         return 0;
     }
 
-    frsync_t *psync = malloc(sizeof(frsync_t));
+    frsync_client_t *psync = malloc(sizeof(frsync_client_t));
     if (!psync)
     {
         FS_ERR("Unable to allocate memory for rsync");
@@ -466,46 +473,44 @@ frsync_t *frsync_create(fistream_t *src, fostream_t *dst)
     memset(psync, 0, sizeof *psync);
 
     psync->ref_counter = 1;
-    psync->src = src->retain(src);
-    psync->dst = dst->retain(dst);
+    psync->dst_uuid = *dst;
+    psync->src_uuid = src->uuid;
+    psync->src = src->src->retain(src->src);
+
+    frsync_client_msgbus_retain(psync, pmsgbus);
 
     return psync;
 }
 
-frsync_t *frsync_retain(frsync_t *psync)
+frsync_client_t *frsync_client_rcv(fmsgbus_t *pmsgbus, frsync_dst_t *dst, fuuid_t const *src)
+{
+    FS_ERR("TODO: Not implemented");
+    return 0;
+}
+
+frsync_client_t *frsync_client_retain(frsync_client_t *psync)
 {
     if (psync)
         psync->ref_counter++;
     else
-        FS_ERR("Invalid rsync");
+        FS_ERR("Invalid rsync client");
     return psync;
 }
 
-void frsync_release(frsync_t *psync)
+void frsync_client_release(frsync_client_t *psync)
 {
     if (psync)
     {
         if (!psync->ref_counter)
-            FS_ERR("Invalid files synchronizer");
+            FS_ERR("Invalid rsync client");
         else if (!--psync->ref_counter)
         {
+            frsync_client_msgbus_release(psync);
             psync->src->release(psync->src);
-            psync->dst->release(psync->dst);
             memset(psync, 0, sizeof *psync);
             free(psync);
         }
     }
     else
-        FS_ERR("Invalid rsync");
-}
-
-bool frsync_update(frsync_t *psync)
-{
-    if (!psync)
-    {
-        FS_ERR("Invalid RSYNC client pointer");
-        return false;
-    }
-
-    return true;
+        FS_ERR("Invalid rsync client");
 }

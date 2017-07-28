@@ -294,7 +294,7 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus)
     {
         FS_ERR("The semaphore initialization is failed");
         fmsgbus_release(pmsgbus);
-        return 0;
+        return FFAIL;
     }
 
     ferr_t ret = fring_queue_create(pmsgbus->buf, sizeof pmsgbus->buf, &pmsgbus->messages);
@@ -310,7 +310,7 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus)
         {
             FS_ERR("The semaphore initialization is failed");
             fmsgbus_release(pmsgbus);
-            return 0;
+            return FFAIL;
         }
 
         fmsgbus_thread_param_t thread_param = { pmsgbus, i };

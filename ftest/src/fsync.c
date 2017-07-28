@@ -1,7 +1,15 @@
 #include "../../fsync/src/rsync.h"
+#include "../../fsync/src/rstream.h"
 #include <futils/stream.h>
+#include <futils/msgbus.h>
 #include <string.h>
 #include <stdio.h>
+
+#include <time.h>
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// rsync test
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 typedef struct
 {
@@ -242,16 +250,36 @@ static void frsync_test()
     if (new_data_ostream.size != data_stream.size
         || memcmp(new_data_ostream.data, data_stream.data, data_stream.size) != 0)
         printf("Delta wasn't applied\n");
+}
 
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// rstream test
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    // TODO
-    //frsync_t *prsync = frsync_create(fistream_t *src, fostream_t *dst);
-    //void      frsync_release(frsync_t *psync);
-    //bool      frsync_update(frsync_t *psync);
+void frstream_test()
+{
+    fmsgbus_t *msgbus = 0;
+    if (fmsgbus_create(&msgbus) == FSUCCESS)
+    {
+        fuuid_t const uuid = { { { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 } } };
+        frstream_factory_t *rstream_factory = frstream_factory(msgbus, &uuid);
+        if (rstream_factory)
+        {
+            fostream_t *ostream = frstream_factory_ostream(rstream_factory, &uuid);
+            if (ostream)
+            {
+                ostream->release(ostream);
+            }
+            static struct timespec const F5_SEC = { 5, 0 };
+            nanosleep(&F5_SEC, NULL);
+            frstream_factory_release(rstream_factory);
+        }
+        fmsgbus_release(msgbus);
+    }
 }
 
 void fsync_test()
 {
     frsync_test();
+    frstream_test();
 }

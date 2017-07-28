@@ -14,17 +14,22 @@ set(FILINK_SOURCES
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-set(FILINK_LIBS
-    futils
-    fnet
-    Threads::Threads
-)
+find_package(OpenSSL REQUIRED)
+
+message (STATUS "OPENSSL_INCLUDE_DIR = ${OPENSSL_INCLUDE_DIR}")
 
 include_directories(
     ../fdb/include
     ../fnet/include
     ../futils/include
     ../fcommon/include
+)
+
+set(FILINK_LIBS
+    futils
+    fnet
+    Threads::Threads
+    ${OPENSSL_LIBRARIES}
 )
 
 if (WIN32)

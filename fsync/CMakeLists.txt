@@ -8,6 +8,7 @@ set(FSYNC_HEADERS
     src/synchronizer.h
     src/file_assembler.h
     src/search_engine.h
+    src/rstream.h
 )
 
 set(FSYNC_SOURCES
@@ -16,6 +17,7 @@ set(FSYNC_SOURCES
     src/synchronizer.c
     src/file_assembler.c
     src/search_engine.c
+    src/rstream.c
 )
 
 set(FSYNC_SOURCES

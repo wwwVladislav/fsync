@@ -9,7 +9,9 @@ typedef enum
     FNODE_STATUS = 1,
     FSYNC_FILES_LIST,
     FFILE_PART_REQUEST,
-    FFILE_PART
+    FFILE_PART,
+    FSTREAM_REQUEST,
+    FSTREAM
 } fmessage_t;
 
 enum
@@ -59,5 +61,18 @@ typedef struct
     uint16_t            size;
     uint8_t             data[FSYNC_BLOCK_SIZE];
 } fmsg_file_part_t;
+
+typedef struct
+{
+    fuuid_t             uuid;
+    fuuid_t             destination;
+} fmsg_stream_request_t;
+
+typedef struct
+{
+    fuuid_t             uuid;
+    fuuid_t             destination;
+    uint32_t            id;
+} fmsg_stream_t;
 
 #endif

@@ -48,9 +48,17 @@ void fvector_release(fvector_t *pvector)
                 free(pvector);
 }
 
-uint8_t *fvector_ptr(fvector_t *pvector)
+void *fvector_ptr(fvector_t *pvector)
 {
-    return pvector ? (uint8_t*)(pvector + 1) : 0;
+    return pvector ? (void*)(pvector + 1) : 0;
+}
+
+void *fvector_at(fvector_t *pvector, size_t idx)
+{
+    if (!pvector
+        || idx >= pvector->size)
+        return 0;
+    return (uint8_t*)(pvector + 1) + pvector->item_size * idx;
 }
 
 size_t fvector_size(fvector_t const *pvector)
@@ -130,6 +138,18 @@ bool fvector_erase(fvector_t **pvector, size_t idx)
     }
 
     return fvector_pop_back(pvector);
+}
+
+bool fvector_clear(fvector_t **pvector)
+{
+    if (!pvector || !*pvector)
+        return false;
+    fvector_t *new_vector = fvector((*pvector)->item_size, 0, 0);
+    if (!new_vector)
+        return false;
+    free(*pvector);
+    *pvector = new_vector;
+    return true;
 }
 
 void fvector_qsort(fvector_t *pvector, int (*compar)(const void *, const void*))

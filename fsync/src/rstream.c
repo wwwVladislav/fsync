@@ -18,6 +18,7 @@ typedef struct
     uint32_t            id;
     fuuid_t             source;
     fmsgbus_t          *msgbus;
+    fmem_iostream_t    *memstream;
 } fristream_t;
 
 static fristream_t *fristream_retain(fristream_t *pstream);
@@ -40,8 +41,16 @@ static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *sou
     pstream->id = id;
     pstream->source = *source;
     pstream->msgbus = fmsgbus_retain(msgbus);
+    pstream->memstream = fmem_iostream(FMEM_BLOCK_SIZE);
 
-    return 0;
+    if (!pstream->memstream)
+    {
+        FS_ERR("Unable to allocate memory stream");
+        fristream_release(pstream);
+        return 0;
+    }
+
+    return pstream;
 }
 
 static fristream_t *fristream_retain(fristream_t *pstream)
@@ -61,7 +70,10 @@ void fristream_release(fristream_t *pstream)
             FS_ERR("Invalid istream");
         else if (!--pstream->ref_counter)
         {
-            fmsgbus_release(pstream->msgbus);
+            if (pstream->msgbus)
+                fmsgbus_release(pstream->msgbus);
+            if (pstream->memstream)
+                fmem_iostream_release(pstream->memstream);
             memset(pstream, 0, sizeof *pstream);
             free(pstream);
         }
@@ -177,11 +189,22 @@ static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory,
 {
     uint32_t const id = ++pfactory->id;
 
+    fristream_t *pistream = fristream(pfactory->msgbus, id, source);
+    if (!pistream)
+    {
+        char str[2 * sizeof(fuuid_t) + 1] = { 0 };
+        FS_ERR("Input stream wasn't created. Source: %s", fuuid2str(source, str, sizeof str));
+        // TODO: Send error message to source
+        return FFAIL;
+    }
+
     for(int i = 0; i < FSTREAM_MAX_HANDLERS; ++i)
     {
         if (pfactory->ilisteners[i].listener)
-            pfactory->ilisteners[i].listener(pfactory->ilisteners[i].param, 0 /* istream */); // TODO
+            pfactory->ilisteners[i].listener(pfactory->ilisteners[i].param, pistream);
     }
+
+    fristream_release(pistream);
 
     return FSUCCESS;
 }

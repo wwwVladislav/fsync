@@ -4,6 +4,7 @@
 #include <futils/msgbus.h>
 #include <string.h>
 #include <stdio.h>
+#include <assert.h>
 
 #include <time.h>
 
@@ -256,22 +257,41 @@ static void frsync_test()
 // rstream test
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+static void fristream_listener(void *ptr, fistream_t *pistream)
+{
+}
+
 void frstream_test()
 {
+    ferr_t err;
     fmsgbus_t *msgbus = 0;
-    if (fmsgbus_create(&msgbus) == FSUCCESS)
+
+    err = fmsgbus_create(&msgbus);
+    assert(err == FSUCCESS);
+
+    if (err == FSUCCESS)
     {
         fuuid_t const uuid = { { { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 } } };
+
         frstream_factory_t *rstream_factory = frstream_factory(msgbus, &uuid);
+        assert(rstream_factory != 0);
+
         if (rstream_factory)
         {
+            err = frstream_factory_istream_subscribe(rstream_factory, fristream_listener, 0);
+            assert(err == FSUCCESS);
+
             fostream_t *ostream = frstream_factory_ostream(rstream_factory, &uuid);
+            assert(ostream != 0);
+
             if (ostream)
             {
                 ostream->release(ostream);
             }
+
             static struct timespec const F5_SEC = { 5, 0 };
             nanosleep(&F5_SEC, NULL);
+
             frstream_factory_release(rstream_factory);
         }
         fmsgbus_release(msgbus);

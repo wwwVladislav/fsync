@@ -10,11 +10,6 @@
 // mem_iostream
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-enum
-{
-    FMEM_IOSTREAM_MIN_CAPACITY = 64
-};
-
 struct fmem_iostream
 {
     volatile uint32_t   ref_counter;
@@ -42,7 +37,7 @@ fmem_iostream_t *fmem_iostream(size_t block_size)
 
     piostream->ref_counter = 1;
     piostream->block_size = block_size;
-    piostream->blocks = fvector(sizeof(char*), 0, FMEM_IOSTREAM_MIN_CAPACITY);
+    piostream->blocks = fvector(sizeof(char*), 0, 0);
     if (!piostream->blocks)
     {
         FS_ERR("Unable to allocate blocks table for iostream");
@@ -86,31 +81,32 @@ static size_t fmem_iostream_write(fmem_iostream_t *piostream, char const *data, 
     if (!data || !size)
         return 0u;
 
-    size_t last_block_idx = (piostream->offset + piostream->data_size) / piostream->block_size;
-    size_t last_block_offset = (piostream->offset + piostream->data_size) % piostream->block_size;
     size_t written_size = 0;
-
-    if (last_block_idx == fvector_size(piostream->blocks))
-    {
-        char *block = malloc(piostream->block_size);
-        if (!block)
-        {
-            FS_ERR("Memory block allocation failed");
-            return 0;
-        }
-
-        if (!fvector_push_back(&piostream->blocks, &block))
-        {
-            FS_ERR("Unable to push memory block to vector");
-            free(block);
-            return 0;
-        }
-
-        last_block_offset = 0;
-    }
 
     while(written_size < size)
     {
+        size_t last_block_idx = (piostream->offset + piostream->data_size) / piostream->block_size;
+        size_t last_block_offset = (piostream->offset + piostream->data_size) % piostream->block_size;
+
+        if (last_block_idx == fvector_size(piostream->blocks))
+        {
+            char *block = malloc(piostream->block_size);
+            if (!block)
+            {
+                FS_ERR("Memory block allocation failed");
+                return 0;
+            }
+
+            if (!fvector_push_back(&piostream->blocks, &block))
+            {
+                FS_ERR("Unable to push memory block to vector");
+                free(block);
+                return 0;
+            }
+
+            last_block_offset = 0;
+        }
+
         assert(fvector_size(piostream->blocks) > last_block_idx);
 
         char *block = *(char**)fvector_at(piostream->blocks, last_block_idx);
@@ -120,34 +116,13 @@ static size_t fmem_iostream_write(fmem_iostream_t *piostream, char const *data, 
             return 0;
         }
 
-        size_t available_space = piostream->block_size - last_block_offset;
-        size_t available_size = size - written_size;
-        size_t write_size = available_size >= available_space ? available_space : available_size;
+        size_t const available_space = piostream->block_size - last_block_offset;
+        size_t const available_size = size - written_size;
+        size_t const write_size = available_size >= available_space ? available_space : available_size;
 
         memcpy(block + last_block_offset, data + written_size, write_size);
         written_size += write_size;
-        last_block_offset += write_size;
         piostream->data_size += write_size;
-
-        if (last_block_offset >= piostream->block_size)
-        {
-            char *block = malloc(piostream->block_size);
-            if (!block)
-            {
-                FS_ERR("Memory block allocation failed");
-                return write_size;
-            }
-
-            if (!fvector_push_back(&piostream->blocks, &block))
-            {
-                FS_ERR("Unable to push memory block to vector");
-                free(block);
-                return write_size;
-            }
-
-            last_block_offset = 0;
-            last_block_idx++;
-        }
     }
 
     return written_size;
@@ -155,8 +130,40 @@ static size_t fmem_iostream_write(fmem_iostream_t *piostream, char const *data, 
 
 static size_t fmem_iostream_read(fmem_iostream_t *piostream, char *data, size_t size)
 {
-    // TODO
-    return 0;
+    if (!size || !data)
+        return 0;
+
+    size_t read_size = 0;
+    while (piostream->data_size && read_size < size)
+    {
+        size_t const block_data_size = piostream->block_size - piostream->offset;
+        size_t const need_size = size - read_size;
+        size_t const r_size = block_data_size < need_size ? block_data_size : need_size;
+
+        char *block = *(char**)fvector_at(piostream->blocks, 0);
+        if (!block)
+        {
+            FS_ERR("Invalid memory blocks vector");
+            break;
+        }
+
+        memcpy(data + read_size, block + piostream->offset, r_size);
+        read_size += r_size;
+        piostream->offset += r_size;
+        piostream->data_size -= r_size;
+
+        if (piostream->offset >= piostream->block_size || !piostream->data_size)
+        {
+            piostream->offset = 0;
+            if (!fvector_erase(&piostream->blocks, 0))
+            {
+                FS_ERR("Invalid memory blocks vector");
+                return 0;
+            }
+        }
+    }
+
+    return read_size;
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

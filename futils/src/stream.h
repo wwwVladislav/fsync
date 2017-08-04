@@ -34,6 +34,11 @@ struct fostream
 
 typedef struct fmem_iostream fmem_iostream_t;
 
+enum
+{
+    FMEM_BLOCK_SIZE = 65536u
+};
+
 fmem_iostream_t *fmem_iostream          (size_t block_size);
 fmem_iostream_t *fmem_iostream_retain   (fmem_iostream_t *piostream);
 void             fmem_iostream_release  (fmem_iostream_t *piostream);

@@ -13,6 +13,8 @@ typedef struct
     } data;
 } fuuid_t;
 
+#define FUUID(...) { { { __VA_ARGS__ } } }
+
 bool fuuid_gen(fuuid_t *);
 char const * fuuid2str(fuuid_t const *, char *buf, size_t size);
 

@@ -201,7 +201,7 @@ static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory,
     for(int i = 0; i < FSTREAM_MAX_HANDLERS; ++i)
     {
         if (pfactory->ilisteners[i].listener)
-            pfactory->ilisteners[i].listener(pfactory->ilisteners[i].param, pistream);
+            pfactory->ilisteners[i].listener(pfactory->ilisteners[i].param, (fistream_t*)pistream);
     }
 
     fristream_release(pistream);
@@ -253,14 +253,14 @@ static void *frstream_factory_ctrl_thread(void *param)
     return 0;
 }
 
-static void frstream_factory_stream_request(frstream_factory_t *pfactory, uint32_t msg_type, fmsg_stream_request_t const *msg, uint32_t size)
+static void frstream_factory_stream_request(frstream_factory_t *pfactory, FMSG_TYPE(stream_request) const *msg)
 {
-    if (memcmp(&msg->destination, &pfactory->uuid, sizeof pfactory->uuid) == 0)
+    if (memcmp(&msg->hdr.dst, &pfactory->uuid, sizeof pfactory->uuid) == 0)
     {
         frstream_msg_stream_request_t stream_request_msg =
         {
             FSTREAM_MSG_REQUEST,
-            msg->uuid
+            msg->hdr.src
         };
 
         ferr_t ret;
@@ -392,17 +392,13 @@ fostream_t *frstream_factory_ostream(frstream_factory_t *pfactory, fuuid_t const
         return 0;
     }
 
-    fmsg_stream_request_t const req =
-    {
-        pfactory->uuid,
-        *dst
-    };
+    FMSG_INIT(stream_request, req, *dst,);
 
     char src_str[2 * sizeof(fuuid_t) + 1] = { 0 };
     char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
     FS_INFO("Requesting stream. src=%s, dst=%s", fuuid2str(&pfactory->uuid, src_str, sizeof src_str), fuuid2str(dst, dst_str, sizeof dst_str));
 
-    if (fmsgbus_publish(pfactory->msgbus, FSTREAM_REQUEST, &req, sizeof req) != FSUCCESS)
+    if (fmsgbus_publish(pfactory->msgbus, FSTREAM_REQUEST, (fmsg_t const *)&req) != FSUCCESS)
         FS_ERR("Stream doesn't requested");
 
     // Wait response

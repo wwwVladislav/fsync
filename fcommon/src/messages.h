@@ -2,6 +2,7 @@
 #define MESSAGES_H_FCOMMON
 #include "limits.h"
 #include <futils/uuid.h>
+#include <futils/msgbus.h>
 #include <futils/md5.h>
 
 typedef enum
@@ -20,11 +21,9 @@ enum
     FSTATUS_R4S_FILES   = 1 << 1    // Node is ready for files synchronization
 };
 
-typedef struct
-{
-    fuuid_t  uuid;
+FMSG_DEF(node_status,
     uint32_t status;
-} fmsg_node_status_t;
+)
 
 typedef struct
 {
@@ -35,44 +34,29 @@ typedef struct
     bool     is_exist;
 } fmsg_sync_file_info_t;
 
-typedef struct
-{
-    fuuid_t                 uuid;
-    fuuid_t                 destination;
+FMSG_DEF(sync_files_list,
     bool                    is_last;
     uint8_t                 files_num;
     fmsg_sync_file_info_t   files[32];
-} fmsg_sync_files_list_t;
+)
 
-typedef struct
-{
-    fuuid_t             uuid;
-    fuuid_t             destination;
-    uint32_t            id;
-    uint32_t            block_number;
-} fmsg_file_part_request_t;
+FMSG_DEF(file_part_request,
+    uint32_t                id;
+    uint32_t                block_number;
+)
 
-typedef struct
-{
-    fuuid_t             uuid;
-    fuuid_t             destination;
-    uint32_t            id;
-    uint32_t            block_number;
-    uint16_t            size;
-    uint8_t             data[FSYNC_BLOCK_SIZE];
-} fmsg_file_part_t;
+FMSG_DEF(file_part,
+    uint32_t                id;
+    uint32_t                block_number;
+    uint16_t                size;
+    uint8_t                 data[FSYNC_BLOCK_SIZE];
+)
 
-typedef struct
-{
-    fuuid_t             uuid;
-    fuuid_t             destination;
-} fmsg_stream_request_t;
+FMSG_DEF(stream_request,
+)
 
-typedef struct
-{
-    fuuid_t             uuid;
-    fuuid_t             destination;
-    uint32_t            id;
-} fmsg_stream_t;
+FMSG_DEF(stream,
+    uint32_t                id;
+)
 
 #endif

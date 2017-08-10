@@ -65,13 +65,12 @@ struct fsynchronizer
     fvector_t              *sync_files;                         // synchronized files (Type: fsynchronizer_file_t)
 };
 
-static void fsynchronizer_file_part_handler(fsynchronizer_t *psynchronizer, uint32_t msg_type, fmsg_file_part_t const *msg, uint32_t size)
+static void fsynchronizer_file_part_handler(fsynchronizer_t *psynchronizer, FMSG_TYPE(file_part) const *msg)
 {
-    (void)size;
-    (void)msg_type;
-    if (memcmp(&msg->uuid, &psynchronizer->uuid, sizeof psynchronizer->uuid) != 0)
+    if (memcmp(&msg->hdr.dst, &psynchronizer->uuid, sizeof psynchronizer->uuid) == 0)
     {
-        FS_INFO("File part received from UUID %llx%llx. id=%u, block=%u, size=%u", msg->uuid.data.u64[0], msg->uuid.data.u64[1], msg->id, msg->block_number, msg->size);
+        char str[2 * sizeof(fuuid_t) + 1] = { 0 };
+        FS_INFO("File part received from UUID %s. id=%u, block=%u, size=%u", fuuid2str(&msg->hdr.src, str, sizeof str), msg->id, msg->block_number, msg->size);
 
         char path[FMAX_PATH] = { 0 };
         uint32_t id = FINVALID_ID;
@@ -79,7 +78,7 @@ static void fsynchronizer_file_part_handler(fsynchronizer_t *psynchronizer, uint
         fdb_transaction_t transaction = { 0 };
         if (fdb_transaction_start(psynchronizer->db, &transaction))
         {
-            fdb_sync_files_map_t *uuid_files_map = fdb_sync_files(&transaction, &msg->uuid);
+            fdb_sync_files_map_t *uuid_files_map = fdb_sync_files(&transaction, &msg->hdr.src);
             if (uuid_files_map)
             {
                 fdb_sync_file_path(uuid_files_map, &transaction, msg->id, path, sizeof path);
@@ -427,17 +426,14 @@ bool fsynchronizer_update(fsynchronizer_t *psynchronizer)
                     break;
                 }
 
-                fmsg_file_part_request_t const req =
-                {
-                    psynchronizer->uuid,
-                    file_srcs[0].uuid,
+                FMSG_INIT(file_part_request, req, psynchronizer->uuid, file_srcs[0].uuid,
                     file_srcs[0].file_id,
                     block_id
-                };
+                );
 
                 FS_INFO("Requesting file content. Id=%u, part=%u", req.id, req.block_number);
 
-                if (fmsgbus_publish(psynchronizer->msgbus, FFILE_PART_REQUEST, &req, sizeof req) != FSUCCESS)
+                if (fmsgbus_publish(psynchronizer->msgbus, FFILE_PART_REQUEST, (fmsg_t const *)&req) != FSUCCESS)
                     FS_ERR("File part not requested");
             }
         }

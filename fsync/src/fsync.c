@@ -72,17 +72,16 @@ static void fsdir_evt_handler(fsdir_event_t const *event, void *arg)
         FS_WARN("Unable to push the file system event into the queue");
 }
 
-static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_status_t const *msg, uint32_t size)
+static void fsync_status_handler(fsync_t *psync, FMSG_TYPE(node_status) const *msg)
 {
-    (void)size;
-    (void)msg_type;
-
-    if (memcmp(&msg->uuid, &psync->uuid, sizeof psync->uuid) == 0)
+    if (memcmp(&msg->hdr.dst, &psync->uuid, sizeof psync->uuid) != 0)
         return;
+
     if ((msg->status & FSTATUS_R4S_DIRS) == 0)
         return;
 
-    FS_INFO("UUID %llx%llx is ready for directories synchronization", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
+    char str[2 * sizeof(fuuid_t) + 1] = { 0 };
+    FS_INFO("UUID %s is ready for directories synchronization", fuuid2str(&msg->hdr.src, str, sizeof str));
 
     fdb_transaction_t transaction = { 0 };
 
@@ -94,11 +93,10 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
             fdb_sync_files_iterator_t *files_iterator = fdb_sync_files_iterator(files_map, &transaction);
             if (files_iterator)
             {
-                fmsg_sync_files_list_t files_list;
-                files_list.uuid = psync->uuid;
-                files_list.destination = msg->uuid;
-                files_list.is_last = false;
-                files_list.files_num = 0;
+                FMSG_INIT(sync_files_list, files_list, psync->uuid, msg->hdr.src,
+                    false,
+                    0
+                );
 
                 fsync_file_info_t info;
 
@@ -115,7 +113,7 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
 
                         if (files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
                         {
-                            if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
+                            if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, (fmsg_t const *)&files_list) != FSUCCESS)
                                 FS_ERR("Files list not published");
                             files_list.files_num = 0;
                         }
@@ -124,7 +122,7 @@ static void fsync_status_handler(fsync_t *psync, uint32_t msg_type, fmsg_node_st
                 fdb_sync_files_iterator_free(files_iterator);
 
                 files_list.is_last = true;
-                if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
+                if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, (fmsg_t const *)&files_list) != FSUCCESS)
                     FS_ERR("Files list not published");
             }
 
@@ -165,11 +163,10 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
                 fdb_sync_files_diff_iterator_t *diff = fdb_sync_files_diff_iterator(files_map_1, files_map_2, &transaction);
                 if (diff)
                 {
-                    fmsg_sync_files_list_t files_list;
-                    files_list.uuid = psync->uuid;
-                    files_list.destination = *uuid;
-                    files_list.is_last = false;
-                    files_list.files_num = 0;
+                    FMSG_INIT(sync_files_list, files_list, psync->uuid, *uuid,
+                        false,
+                        0
+                    );
 
                     fsync_file_info_t info;
                     bool have_diff = false;
@@ -187,7 +184,7 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
 
                         if (files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
                         {
-                            if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
+                            if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, (fmsg_t const *)&files_list) != FSUCCESS)
                                 FS_ERR("Files list not published");
                             files_list.files_num = 0;
                         }
@@ -198,7 +195,7 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
                     if (have_diff)
                     {
                         files_list.is_last = true;
-                        if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
+                        if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, (fmsg_t const *)&files_list) != FSUCCESS)
                             FS_ERR("Files list not published");
                     }
                 }
@@ -213,14 +210,13 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
     }
 }
 
-static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fmsg_sync_files_list_t const *msg, uint32_t size)
+static void fsync_sync_files_list_handler(fsync_t *psync, FMSG_TYPE(sync_files_list) const *msg)
 {
-    (void)size;
-    (void)msg_type;
-    if (memcmp(&msg->uuid, &psync->uuid, sizeof psync->uuid) == 0)
+    if (memcmp(&msg->hdr.dst, &psync->uuid, sizeof psync->uuid) != 0)
         return;
 
-    FS_INFO("UUID %llx%llx sent files list for synchronization", msg->uuid.data.u64[0], msg->uuid.data.u64[1]);
+    char str[2 * sizeof(fuuid_t) + 1] = { 0 };
+    FS_INFO("UUID %s sent files list for synchronization", fuuid2str(&msg->hdr.src, str, sizeof str));
 
     bool is_need_sync = false;
     fdb_sync_files_map_t *files_map;
@@ -230,7 +226,7 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
     // Remote node files list (+)
     if (fdb_transaction_start(psync->db, &transaction))
     {
-        files_map = fdb_sync_files(&transaction, &msg->uuid);
+        files_map = fdb_sync_files(&transaction, &msg->hdr.src);
         if (files_map)
         {
             FS_INFO("Received %u files info", msg->files_num);
@@ -266,11 +262,10 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
         {
             if (fdb_sync_files_statuses(&transaction, &psync->uuid, &status_map))
             {
-                fmsg_sync_files_list_t files_list;
-                files_list.uuid = psync->uuid;
-                files_list.destination = msg->uuid;
-                files_list.is_last = false;
-                files_list.files_num = 0;
+                FMSG_INIT(sync_files_list, files_list, psync->uuid, msg->hdr.src,
+                    false,
+                    0
+                );
 
                 fsync_file_info_t info;
 
@@ -296,7 +291,7 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
 
                         if (files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
                         {
-                            if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
+                            if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, (fmsg_t const *)&files_list) != FSUCCESS)
                                 FS_ERR("Files list not published");
                             files_list.files_num = 0;
                         }
@@ -312,7 +307,7 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
                 if (is_need_sync)
                 {
                     files_list.is_last = true;
-                    if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, &files_list, sizeof files_list) != FSUCCESS)
+                    if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, (fmsg_t const *)&files_list) != FSUCCESS)
                         FS_ERR("Files list not published");
                 }
             }
@@ -333,18 +328,16 @@ static void fsync_sync_files_list_handler(fsync_t *psync, uint32_t msg_type, fms
     if (msg->is_last)
     {
         FS_INFO("Notify files lists difference");
-        fsync_notify_files_diff(psync, &msg->uuid);
+        fsync_notify_files_diff(psync, &msg->hdr.src);
     }
 }
 
-static void fsync_file_part_request_handler(fsync_t *psync, uint32_t msg_type, fmsg_file_part_request_t const *msg, uint32_t size)
+static void fsync_file_part_request_handler(fsync_t *psync, FMSG_TYPE(file_part_request) const *msg)
 {
-    (void)size;
-    (void)msg_type;
-
-    if (memcmp(&msg->uuid, &psync->uuid, sizeof psync->uuid) != 0)
+    if (memcmp(&msg->hdr.dst, &psync->uuid, sizeof psync->uuid) == 0)
     {
-        FS_INFO("UUID %llx%llx requests file content. Id=%u, part=%u", msg->uuid.data.u64[0], msg->uuid.data.u64[1], msg->id, msg->block_number);
+        char str[2 * sizeof(fuuid_t) + 1] = { 0 };
+        FS_INFO("UUID %s requests file content. Id=%u, part=%u", fuuid2str(&msg->hdr.src, str, sizeof str), msg->id, msg->block_number);
 
         char path[2 * FMAX_PATH];
         size_t len = strlen(psync->dir);
@@ -362,11 +355,10 @@ static void fsync_file_part_request_handler(fsync_t *psync, uint32_t msg_type, f
                     int fd = open(path, O_BINARY | O_RDONLY);
                     if (fd != -1)
                     {
-                        fmsg_file_part_t part;
-                        part.uuid         = psync->uuid;
-                        part.destination  = msg->uuid;
-                        part.id           = msg->id;
-                        part.block_number = msg->block_number;
+                        FMSG_INIT(file_part, part, psync->uuid, msg->hdr.src,
+                            msg->id,
+                            msg->block_number
+                        );
 
                         if (lseek(fd, part.block_number * sizeof part.data, SEEK_SET) >= 0)
                         {
@@ -374,7 +366,7 @@ static void fsync_file_part_request_handler(fsync_t *psync, uint32_t msg_type, f
                             if (size > 0)
                             {
                                 part.size = size;
-                                if (fmsgbus_publish(psync->msgbus, FFILE_PART, &part, sizeof part) != FSUCCESS)
+                                if (fmsgbus_publish(psync->msgbus, FFILE_PART, (fmsg_t const *)&part) != FSUCCESS)
                                     FS_ERR("File part message not published");
                             }
                             else FS_ERR("File reading failed");
@@ -671,8 +663,11 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t co
     while(!psync->is_events_queue_processing_active)
         nanosleep(&F1_SEC, NULL);
 
-    fmsg_node_status_t const status = { *uuid, FSTATUS_R4S_DIRS };
-    if (fmsgbus_publish(psync->msgbus, FNODE_STATUS, &status, sizeof status) != FSUCCESS)
+    FMSG_INIT(node_status, status, psync->uuid, FUUID( 0 ),
+        FSTATUS_R4S_DIRS
+    );
+
+    if (fmsgbus_publish(psync->msgbus, FNODE_STATUS, (fmsg_t const *)&status) != FSUCCESS)
         FS_ERR("Node status not published");
 
     return psync;

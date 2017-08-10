@@ -20,15 +20,14 @@ enum
 
 typedef struct
 {
-    uint32_t        type;
+    uint32_t        operation;
     uint32_t        msg_type;
-    uint8_t        *msg_data;
-    uint32_t        msg_size;
+    uint8_t        *data;
 } fmsgbus_msg_t;
 
 typedef struct
 {
-    uint32_t        type;
+    uint32_t        operation;
     uint32_t        msg_type;
     fmsg_handler_t  handler;
     void           *param;
@@ -38,7 +37,7 @@ typedef struct
 
 typedef struct
 {
-    uint32_t        type;
+    uint32_t        operation;
     uint32_t        msg_type;
     fmsg_handler_t  handler;
     sem_t          *sem;
@@ -64,8 +63,7 @@ typedef struct
     pthread_t           thread;
     sem_t               sem;
     volatile uint32_t   msg_type;
-    uint8_t * volatile  msg_data;
-    volatile uint32_t   msg_size;
+    fmsg_t * volatile   msg;
 } fmsgbus_thread_t;
 
 typedef struct
@@ -102,17 +100,16 @@ struct fmsgbus
 
 #define fmsgbus_pop_lock() pthread_cleanup_pop(1)
 
-static bool fmsgbus_msg_handle(fmsgbus_t *msgbus, uint32_t msg_type, uint8_t *msg_data, uint32_t msg_size)
+static bool fmsgbus_msg_handle(fmsgbus_t *msgbus, uint32_t msg_type, fmsg_t *msg)
 {
     for(uint32_t thread_id = 0; thread_id < FMSGBUS_MAX_THREADS; ++thread_id)
     {
         fmsgbus_thread_t *thread = &msgbus->threads[thread_id];
         if (thread->is_active
-            && !thread->msg_data)
+            && !thread->msg)
         {
             thread->msg_type = msg_type;
-            thread->msg_data = msg_data;
-            thread->msg_size = msg_size;
+            thread->msg      = msg;
             sem_post(&thread->sem);
             return true;
         }
@@ -194,8 +191,9 @@ static void *fmsgbus_ctrl_thread(void *param)
             {
                 case FMSGBUS_MSG:
                 {
-                    fmsgbus_msg_t *msg = (fmsgbus_msg_t *)data;
-                    if (fmsgbus_msg_handle(msgbus, msg->msg_type, msg->msg_data, msg->msg_size))
+                    fmsgbus_msg_t *cmsg = (fmsgbus_msg_t *)data;
+                    fmsg_t *msg = (fmsg_t*)cmsg->data;
+                    if (fmsgbus_msg_handle(msgbus, cmsg->msg_type, msg))
                         fring_queue_pop_front(msgbus->messages);
                     else
                     {
@@ -238,8 +236,8 @@ static void *fmsgbus_ctrl_thread(void *param)
 static void *fmsgbus_thread(void *param)
 {
     fmsgbus_thread_param_t *thread_param = (fmsgbus_thread_param_t *)param;
-    fmsgbus_t *msgbus        = thread_param->msgbus;
-    fmsgbus_thread_t *thread = &msgbus->threads[thread_param->thread_id];
+    fmsgbus_t              *msgbus       = thread_param->msgbus;
+    fmsgbus_thread_t       *thread       = &msgbus->threads[thread_param->thread_id];
 
     thread->is_active = true;
 
@@ -257,13 +255,12 @@ static void *fmsgbus_thread(void *param)
 
             if (handler->msg_type == thread->msg_type
                 && handler->handler)
-                handler->handler(handler->param, thread->msg_type, thread->msg_data, thread->msg_size);
+                handler->handler(handler->param, thread->msg);
         }
 
-        free(thread->msg_data);
-        thread->msg_size = 0;
+        free(thread->msg);
         thread->msg_type = 0;
-        thread->msg_data = 0;
+        thread->msg = 0;
     }
 
     return 0;
@@ -485,9 +482,9 @@ ferr_t fmsgbus_unsubscribe(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t
     return ret;
 }
 
-ferr_t fmsgbus_publish(fmsgbus_t *pmsgbus, uint32_t msg_type, void const *data, uint32_t size)
+ferr_t fmsgbus_publish(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_t const *msg)
 {
-    if (!pmsgbus)
+    if (!pmsgbus || !msg)
     {
         FS_ERR("Invalid argument");
         return FERR_INVALID_ARG;
@@ -495,30 +492,29 @@ ferr_t fmsgbus_publish(fmsgbus_t *pmsgbus, uint32_t msg_type, void const *data, 
 
     ferr_t ret;
 
-    fmsgbus_msg_t msg =
+    fmsgbus_msg_t cmsg =
     {
         FMSGBUS_MSG,
         msg_type,
-        malloc(size),
-        size
+        malloc(msg->size)
     };
 
-    if (!msg.msg_data)
+    if (!cmsg.data)
     {
         FS_ERR("No free space of memory");
         return FERR_NO_MEM;
     }
 
-    memcpy(msg.msg_data, data, size);
+    memcpy(cmsg.data, msg, msg->size);
 
     fmsgbus_push_lock(pmsgbus->messages_mutex);
-    ret = fring_queue_push_back(pmsgbus->messages, &msg, sizeof msg);
+    ret = fring_queue_push_back(pmsgbus->messages, &cmsg, sizeof cmsg);
     fmsgbus_pop_lock();
 
     if (ret == FSUCCESS)
         sem_post(&pmsgbus->messages_sem);
     else
-        free(msg.msg_data);
+        free(cmsg.data);
 
     return ret;
 }

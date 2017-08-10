@@ -426,7 +426,7 @@ bool fsynchronizer_update(fsynchronizer_t *psynchronizer)
                     break;
                 }
 
-                FMSG_INIT(file_part_request, req, psynchronizer->uuid, file_srcs[0].uuid,
+                FMSG(file_part_request, req, psynchronizer->uuid, file_srcs[0].uuid,
                     file_srcs[0].file_id,
                     block_id
                 );

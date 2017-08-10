@@ -392,16 +392,18 @@ fostream_t *frstream_factory_ostream(frstream_factory_t *pfactory, fuuid_t const
         return 0;
     }
 
-    FMSG_INIT(stream_request, req, *dst,);
+    FMSG(stream_request, req, pfactory->uuid, *dst,);
 
     char src_str[2 * sizeof(fuuid_t) + 1] = { 0 };
     char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
     FS_INFO("Requesting stream. src=%s, dst=%s", fuuid2str(&pfactory->uuid, src_str, sizeof src_str), fuuid2str(dst, dst_str, sizeof dst_str));
 
-    if (fmsgbus_publish(pfactory->msgbus, FSTREAM_REQUEST, (fmsg_t const *)&req) != FSUCCESS)
-        FS_ERR("Stream doesn't requested");
+    FMSG(stream, stream_resp, FUUID(0), FUUID(0),
+        0
+    );
 
-    // Wait response
+    if (fmsgbus_request(pfactory->msgbus, FSTREAM_REQUEST, (fmsg_t const *)&req, (fmsg_t *)&stream_resp) != FSUCCESS)
+        FS_ERR("Stream doesn't requested");
 
     // fmsg_stream_request_t
     // fmsg_stream_t

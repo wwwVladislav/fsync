@@ -93,7 +93,7 @@ static void fsync_status_handler(fsync_t *psync, FMSG_TYPE(node_status) const *m
             fdb_sync_files_iterator_t *files_iterator = fdb_sync_files_iterator(files_map, &transaction);
             if (files_iterator)
             {
-                FMSG_INIT(sync_files_list, files_list, psync->uuid, msg->hdr.src,
+                FMSG(sync_files_list, files_list, psync->uuid, msg->hdr.src,
                     false,
                     0
                 );
@@ -163,7 +163,7 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
                 fdb_sync_files_diff_iterator_t *diff = fdb_sync_files_diff_iterator(files_map_1, files_map_2, &transaction);
                 if (diff)
                 {
-                    FMSG_INIT(sync_files_list, files_list, psync->uuid, *uuid,
+                    FMSG(sync_files_list, files_list, psync->uuid, *uuid,
                         false,
                         0
                     );
@@ -262,7 +262,7 @@ static void fsync_sync_files_list_handler(fsync_t *psync, FMSG_TYPE(sync_files_l
         {
             if (fdb_sync_files_statuses(&transaction, &psync->uuid, &status_map))
             {
-                FMSG_INIT(sync_files_list, files_list, psync->uuid, msg->hdr.src,
+                FMSG(sync_files_list, files_list, psync->uuid, msg->hdr.src,
                     false,
                     0
                 );
@@ -355,7 +355,7 @@ static void fsync_file_part_request_handler(fsync_t *psync, FMSG_TYPE(file_part_
                     int fd = open(path, O_BINARY | O_RDONLY);
                     if (fd != -1)
                     {
-                        FMSG_INIT(file_part, part, psync->uuid, msg->hdr.src,
+                        FMSG(file_part, part, psync->uuid, msg->hdr.src,
                             msg->id,
                             msg->block_number
                         );
@@ -663,7 +663,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t co
     while(!psync->is_events_queue_processing_active)
         nanosleep(&F1_SEC, NULL);
 
-    FMSG_INIT(node_status, status, psync->uuid, FUUID( 0 ),
+    FMSG(node_status, status, psync->uuid, FUUID( 0 ),
         FSTATUS_R4S_DIRS
     );
 

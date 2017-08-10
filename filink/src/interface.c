@@ -249,7 +249,7 @@ static void filink_msgbus_release(filink_t *ilink)
 
 static void fproto_node_status_handler(filink_t *ilink, fproto_node_status_t const *pmsg)
 {
-    FMSG_INIT(node_status, msg, pmsg->uuid, ilink->uuid,
+    FMSG(node_status, msg, pmsg->uuid, ilink->uuid,
         filink_status_from_proto(pmsg->status)
     );
     fmsgbus_publish(ilink->msgbus, FNODE_STATUS, (fmsg_t const *)&msg);
@@ -257,7 +257,7 @@ static void fproto_node_status_handler(filink_t *ilink, fproto_node_status_t con
 
 static void fproto_sync_files_list_handler(filink_t *ilink, fproto_sync_files_list_t const *pmsg)
 {
-    FMSG_INIT(sync_files_list, msg, pmsg->uuid, ilink->uuid,
+    FMSG(sync_files_list, msg, pmsg->uuid, ilink->uuid,
         pmsg->is_last,
         pmsg->files_num
     );
@@ -276,7 +276,7 @@ static void fproto_sync_files_list_handler(filink_t *ilink, fproto_sync_files_li
 
 static void fproto_file_part_request_handler(filink_t *ilink, fproto_file_part_request_t const *pmsg)
 {
-    FMSG_INIT(file_part_request, msg, pmsg->uuid, ilink->uuid,
+    FMSG(file_part_request, msg, pmsg->uuid, ilink->uuid,
         pmsg->id,
         pmsg->block_number
     );
@@ -286,7 +286,7 @@ static void fproto_file_part_request_handler(filink_t *ilink, fproto_file_part_r
 
 static void fproto_file_part_handler(filink_t *ilink, fproto_file_part_t const *pmsg)
 {
-    FMSG_INIT(file_part, msg, pmsg->uuid, ilink->uuid,
+    FMSG(file_part, msg, pmsg->uuid, ilink->uuid,
         pmsg->id,
         pmsg->block_number,
         pmsg->size

@@ -112,8 +112,11 @@ enum
 enum
 {
     FSTREAM_MSG_REQUEST = 0,
+    FSTREAM_MSG,
     FSTREAM_MSG_SUBSCRIBE_ISTREAM_LISTENER,
-    FSTREAM_MSG_UNSUBSCRIBE_ISTREAM_LISTENER
+    FSTREAM_MSG_SUBSCRIBE_OSTREAM_LISTENER,
+    FSTREAM_MSG_UNSUBSCRIBE_ISTREAM_LISTENER,
+    FSTREAM_MSG_UNSUBSCRIBE_OSTREAM_LISTENER
 };
 
 typedef struct
@@ -125,11 +128,27 @@ typedef struct
 typedef struct
 {
     uint32_t                type;
+    fuuid_t                 dst;
+    uint32_t                id;
+} frstream_msg_stream_t;
+
+typedef struct
+{
+    uint32_t                type;
     fristream_listener_t    listener;
     void                   *param;
     sem_t                  *sem;
     ferr_t                 *ret;
 } frstream_msg_subscribe_istream_listener_t;
+
+typedef struct
+{
+    uint32_t                type;
+    frostream_listener_t    listener;
+    void                   *param;
+    sem_t                  *sem;
+    ferr_t                 *ret;
+} frstream_msg_subscribe_ostream_listener_t;
 
 typedef struct
 {
@@ -196,6 +215,29 @@ static ferr_t frstream_factory_subscribe_istream_listener_impl(frstream_factory_
     return FSUCCESS;
 }
 
+static ferr_t frstream_factory_subscribe_ostream_listener_impl(frstream_factory_t *pfactory, frostream_listener_t listener, void *param)
+{
+    int i = 0;
+
+    for(; i < FSTREAM_MAX_HANDLERS; ++i)
+    {
+        if (!pfactory->olisteners[i].listener)
+        {
+            pfactory->olisteners[i].param = param;
+            pfactory->olisteners[i].listener = listener;
+            break;
+        }
+    }
+
+    if (i >= FSTREAM_MAX_HANDLERS)
+    {
+        FS_ERR("No free space in ostream listeners table");
+        return FFAIL;
+    }
+
+    return FSUCCESS;
+}
+
 static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory, fuuid_t const *source)
 {
     uint32_t const id = ++pfactory->id;
@@ -232,6 +274,11 @@ static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory,
     return rc;
 }
 
+static ferr_t frstream_factory_stream_impl(frstream_factory_t *pfactory, fuuid_t const *dst, uint32_t id)
+{
+    frostream_t *postream = frostream(pfactory->msgbus, id, dst);
+}
+
 static void *frstream_factory_ctrl_thread(void *param)
 {
     frstream_factory_t *pfactory = (frstream_factory_t *)param;
@@ -261,10 +308,26 @@ static void *frstream_factory_ctrl_thread(void *param)
                     break;
                 }
 
+                case FSTREAM_MSG:
+                {
+                    frstream_msg_stream_t *msg = (frstream_msg_stream_t *)data;
+                    frstream_factory_stream_impl(pfactory, &msg->dst, msg->id);
+                    break;
+                }
+
                 case FSTREAM_MSG_SUBSCRIBE_ISTREAM_LISTENER:
                 {
                     frstream_msg_subscribe_istream_listener_t *msg = (frstream_msg_subscribe_istream_listener_t *)data;
                     *msg->ret = frstream_factory_subscribe_istream_listener_impl(pfactory, msg->listener, msg->param);
+                    sem_post(msg->sem);
+                    fring_queue_pop_front(pfactory->messages);
+                    break;
+                }
+
+                case FSTREAM_MSG_SUBSCRIBE_OSTREAM_LISTENER:
+                {
+                    frstream_msg_subscribe_ostream_listener_t *msg = (frstream_msg_subscribe_ostream_listener_t *)data;
+                    *msg->ret = frstream_factory_subscribe_ostream_listener_impl(pfactory, msg->listener, msg->param);
                     sem_post(msg->sem);
                     fring_queue_pop_front(pfactory->messages);
                     break;
@@ -302,10 +365,31 @@ static void frstream_factory_stream_request(frstream_factory_t *pfactory, FMSG_T
     }
 }
 
-static void frstream_factory_stream(frstream_factory_t *pfactory, uint32_t msg_type, fmsg_stream_t const *msg, uint32_t size)
+static void frstream_factory_stream(frstream_factory_t *pfactory, FMSG_TYPE(stream) const *msg)
 {
-    int i = 0;
-    ++i;
+    if (memcmp(&msg->hdr.dst, &pfactory->uuid, sizeof pfactory->uuid) == 0)
+    {
+        frstream_msg_stream_t stream_msg =
+        {
+            FSTREAM_MSG,
+            msg->hdr.src,
+            msg->id
+        };
+
+        ferr_t ret;
+
+        frstream_factory_push_lock(pfactory->messages_mutex);
+        ret = fring_queue_push_back(pfactory->messages, &stream_msg, sizeof stream_msg);
+        frstream_factory_pop_lock();
+
+        if (ret == FSUCCESS)
+            sem_post(&pfactory->messages_sem);
+        else
+        {
+            char str[2 * sizeof(fuuid_t) + 1] = { 0 };
+            FS_ERR("Stream (dst %s) handler failed", fuuid2str(&stream_msg.dst, str, sizeof str));
+        }
+    }
 }
 
 static void frstream_factory_msgbus_retain(frstream_factory_t *pfactory, fmsgbus_t *pmsgbus)
@@ -450,6 +534,54 @@ ferr_t frstream_factory_istream_subscribe(frstream_factory_t *pfactory, fristrea
     {
         FSTREAM_MSG_SUBSCRIBE_ISTREAM_LISTENER,
         istream_listener,
+        param,
+        &sem,
+        &result
+    };
+
+    frstream_factory_push_lock(pfactory->messages_mutex);
+    ret = fring_queue_push_back(pfactory->messages, &msg, sizeof msg);
+    frstream_factory_pop_lock();
+
+    if (ret == FSUCCESS)
+    {
+        sem_post(&pfactory->messages_sem);
+
+        // Waiting for completion
+        struct timespec tm = { time(0) + 1, 0 };
+        while(pfactory->ctrl_thread.is_active && sem_timedwait(&sem, &tm) == -1 && errno == EINTR)
+            continue;       // Restart if interrupted by handler
+
+        ret = result;
+    }
+
+    sem_destroy(&sem);
+
+    return ret;
+}
+
+ferr_t frstream_factory_ostream_subscribe(frstream_factory_t *pfactory, frostream_listener_t ostream_listener, void *param)
+{
+    if (!pfactory || !ostream_listener)
+    {
+        FS_ERR("Invalid arguments");
+        return FFAIL;
+    }
+
+    ferr_t ret;
+    sem_t  sem;
+    ferr_t result = FSUCCESS;
+
+    if (sem_init(&sem, 0, 0) == -1)
+    {
+        FS_ERR("The semaphore initialization is failed");
+        return FFAIL;
+    }
+
+    frstream_msg_subscribe_ostream_listener_t msg =
+    {
+        FSTREAM_MSG_SUBSCRIBE_OSTREAM_LISTENER,
+        ostream_listener,
         param,
         &sem,
         &result

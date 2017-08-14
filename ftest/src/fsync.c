@@ -261,8 +261,13 @@ static void fristream_listener(void *ptr, fistream_t *pistream)
 {
 }
 
+static void frostream_listener(void *ptr, fostream_t *postream)
+{
+}
+
 void frstream_test()
 {
+    ferr_t rc;
     fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 
@@ -273,8 +278,9 @@ void frstream_test()
 
     if (rstream_factory)
     {
-        assert(frstream_factory_istream_subscribe(rstream_factory, fristream_listener, 0) == FSUCCESS);
-        assert(frstream_factory_ostream(rstream_factory, &uuid) == FSUCCESS);
+        rc = frstream_factory_istream_subscribe(rstream_factory, fristream_listener, 0);    assert(rc == FSUCCESS);
+        rc = frstream_factory_ostream_subscribe(rstream_factory, frostream_listener, 0);    assert(rc == FSUCCESS);
+        rc = frstream_factory_ostream(rstream_factory, &uuid);                              assert(rc == FSUCCESS);
 
         static struct timespec const F5_SEC = { 5, 0 };
         nanosleep(&F5_SEC, NULL);

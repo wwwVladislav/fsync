@@ -22,7 +22,7 @@ typedef struct
 {
     uint32_t        operation;
     uint32_t        msg_type;
-    uint8_t        *data;
+    fmsg_t         *msg;
 } fmsgbus_msg_t;
 
 typedef struct
@@ -192,8 +192,7 @@ static void *fmsgbus_ctrl_thread(void *param)
                 case FMSGBUS_MSG:
                 {
                     fmsgbus_msg_t *cmsg = (fmsgbus_msg_t *)data;
-                    fmsg_t *msg = (fmsg_t*)cmsg->data;
-                    if (fmsgbus_msg_handle(msgbus, cmsg->msg_type, msg))
+                    if (fmsgbus_msg_handle(msgbus, cmsg->msg_type, cmsg->msg))
                         fring_queue_pop_front(msgbus->messages);
                     else
                     {
@@ -499,13 +498,13 @@ ferr_t fmsgbus_publish(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_t const *msg)
         malloc(msg->size)
     };
 
-    if (!cmsg.data)
+    if (!cmsg.msg)
     {
         FS_ERR("No free space of memory");
         return FERR_NO_MEM;
     }
 
-    memcpy(cmsg.data, msg, msg->size);
+    memcpy(cmsg.msg, msg, msg->size);
 
     fmsgbus_push_lock(pmsgbus->messages_mutex);
     ret = fring_queue_push_back(pmsgbus->messages, &cmsg, sizeof cmsg);
@@ -514,7 +513,7 @@ ferr_t fmsgbus_publish(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_t const *msg)
     if (ret == FSUCCESS)
         sem_post(&pmsgbus->messages_sem);
     else
-        free(cmsg.data);
+        free(cmsg.msg);
 
     return ret;
 }

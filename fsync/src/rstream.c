@@ -3,6 +3,7 @@
 #include <futils/queue.h>
 #include <fcommon/messages.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -15,6 +16,7 @@ typedef struct
 {
     fistream_t          istream;
     volatile uint32_t   ref_counter;
+    volatile bool       is_open;
     uint32_t            id;
     fuuid_t             source;
     fmsgbus_t          *msgbus;
@@ -22,7 +24,7 @@ typedef struct
 } fristream_t;
 
 static fristream_t *fristream_retain(fristream_t *pstream);
-static void         fristream_release(fristream_t *pstream);
+static bool         fristream_release(fristream_t *pstream);
 
 static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *source)
 {
@@ -38,6 +40,7 @@ static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *sou
     pstream->istream.release = (fistream_release_fn_t)fristream_release;
 
     pstream->ref_counter = 1;
+    pstream->is_open = true;
     pstream->id = id;
     pstream->source = *source;
     pstream->msgbus = fmsgbus_retain(msgbus);
@@ -62,7 +65,7 @@ static fristream_t *fristream_retain(fristream_t *pstream)
     return pstream;
 }
 
-void fristream_release(fristream_t *pstream)
+bool fristream_release(fristream_t *pstream)
 {
     if (pstream)
     {
@@ -76,10 +79,18 @@ void fristream_release(fristream_t *pstream)
                 fmem_iostream_release(pstream->memstream);
             memset(pstream, 0, sizeof *pstream);
             free(pstream);
+            return true;
         }
     }
     else
         FS_ERR("Invalid istream");
+    return false;
+}
+
+static void fristream_close(fristream_t *pstream)
+{
+    pstream->is_open = false;
+    // TODO
 }
 
 //typedef size_t      (*fistream_read_fn_t)   (fistream_t *, char *, size_t);
@@ -188,25 +199,37 @@ static ferr_t frstream_factory_subscribe_istream_listener_impl(frstream_factory_
 static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory, fuuid_t const *source)
 {
     uint32_t const id = ++pfactory->id;
-
     fristream_t *pistream = fristream(pfactory->msgbus, id, source);
-    if (!pistream)
+
+    if (pistream)
+    {
+        for(int i = 0; i < FSTREAM_MAX_HANDLERS; ++i)
+        {
+            if (pfactory->ilisteners[i].listener)
+                pfactory->ilisteners[i].listener(pfactory->ilisteners[i].param, (fistream_t*)pistream);
+        }
+    }
+
+    if (!pistream || fristream_release(pistream))
     {
         char str[2 * sizeof(fuuid_t) + 1] = { 0 };
         FS_ERR("Input stream wasn't created. Source: %s", fuuid2str(source, str, sizeof str));
-        // TODO: Send error message to source
         return FFAIL;
     }
 
-    for(int i = 0; i < FSTREAM_MAX_HANDLERS; ++i)
+    // Send stream ID to source
+    FMSG(stream, req, pfactory->uuid, *source,
+        id
+    );
+
+    ferr_t rc = fmsgbus_publish(pfactory->msgbus, FSTREAM, (fmsg_t const *)&req);
+    if (rc != FSUCCESS)
     {
-        if (pfactory->ilisteners[i].listener)
-            pfactory->ilisteners[i].listener(pfactory->ilisteners[i].param, (fistream_t*)pistream);
+        fristream_close(pistream);
+        FS_ERR("Unable to publish stream");
     }
 
-    fristream_release(pistream);
-
-    return FSUCCESS;
+    return rc;
 }
 
 static void *frstream_factory_ctrl_thread(void *param)
@@ -384,7 +407,7 @@ void frstream_factory_release(frstream_factory_t *pfactory)
 }
 
 // src(ostream) ----> dst(istream)
-fostream_t *frstream_factory_ostream(frstream_factory_t *pfactory, fuuid_t const *dst)
+ferr_t frstream_factory_ostream(frstream_factory_t *pfactory, fuuid_t const *dst)
 {
     if (!pfactory || !dst)
     {
@@ -398,19 +421,11 @@ fostream_t *frstream_factory_ostream(frstream_factory_t *pfactory, fuuid_t const
     char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
     FS_INFO("Requesting stream. src=%s, dst=%s", fuuid2str(&pfactory->uuid, src_str, sizeof src_str), fuuid2str(dst, dst_str, sizeof dst_str));
 
-    FMSG(stream, stream_resp, FUUID(0), FUUID(0),
-        0
-    );
+    ferr_t rc = fmsgbus_publish(pfactory->msgbus, FSTREAM_REQUEST, (fmsg_t const *)&req);
+    if (rc != FSUCCESS)
+        FS_ERR("Stream wasn't requested");
 
-    if (fmsgbus_request(pfactory->msgbus, FSTREAM_REQUEST, (fmsg_t const *)&req, (fmsg_t *)&stream_resp) != FSUCCESS)
-        FS_ERR("Stream doesn't requested");
-
-    // fmsg_stream_request_t
-    // fmsg_stream_t
-
-    // TODO
-
-    return 0;
+    return rc;
 }
 
 ferr_t frstream_factory_istream_subscribe(frstream_factory_t *pfactory, fristream_listener_t istream_listener, void *param)

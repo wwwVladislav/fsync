@@ -263,38 +263,26 @@ static void fristream_listener(void *ptr, fistream_t *pistream)
 
 void frstream_test()
 {
-    ferr_t err;
     fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 
-    err = fmsgbus_create(&msgbus);
-    assert(err == FSUCCESS);
+    assert(fmsgbus_create(&msgbus) == FSUCCESS);
 
-    if (err == FSUCCESS)
+    frstream_factory_t *rstream_factory = frstream_factory(msgbus, &uuid);
+    assert(rstream_factory != 0);
+
+    if (rstream_factory)
     {
-        frstream_factory_t *rstream_factory = frstream_factory(msgbus, &uuid);
-        assert(rstream_factory != 0);
+        assert(frstream_factory_istream_subscribe(rstream_factory, fristream_listener, 0) == FSUCCESS);
+        assert(frstream_factory_ostream(rstream_factory, &uuid) == FSUCCESS);
 
-        if (rstream_factory)
-        {
-            err = frstream_factory_istream_subscribe(rstream_factory, fristream_listener, 0);
-            assert(err == FSUCCESS);
+        static struct timespec const F5_SEC = { 5, 0 };
+        nanosleep(&F5_SEC, NULL);
 
-            fostream_t *ostream = frstream_factory_ostream(rstream_factory, &uuid);
-            // TODO: assert(ostream != 0);
-
-            if (ostream)
-            {
-                ostream->release(ostream);
-            }
-
-            static struct timespec const F5_SEC = { 5, 0 };
-            nanosleep(&F5_SEC, NULL);
-
-            frstream_factory_release(rstream_factory);
-        }
-        fmsgbus_release(msgbus);
+        frstream_factory_release(rstream_factory);
     }
+    fmsgbus_release(msgbus);
+
 }
 
 void fsync_test()

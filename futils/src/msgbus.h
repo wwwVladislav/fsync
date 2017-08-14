@@ -11,7 +11,6 @@ typedef struct fmsg
     uint32_t size;  // message size
     fuuid_t  src;   // source address
     fuuid_t  dst;   // destination address
-    uint32_t id;    // for request/response pair should has non zero value
 } fmsg_t;
 
 #define FMSG_TYPE(name) fmsg_##name##_t
@@ -26,7 +25,7 @@ typedef struct fmsg
 #define FMSG(name, msg, src, dst, ...)              \
     fmsg_##name##_t msg =                           \
     {                                               \
-        { sizeof(fmsg_##name##_t), src, dst, 0 },   \
+        { sizeof(fmsg_##name##_t), src, dst },      \
         __VA_ARGS__                                 \
     }
 
@@ -38,6 +37,5 @@ void       fmsgbus_release    (fmsgbus_t *pmsgbus);
 ferr_t     fmsgbus_subscribe  (fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t handler, void *param);
 ferr_t     fmsgbus_unsubscribe(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t handler);
 ferr_t     fmsgbus_publish    (fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_t const *msg);
-ferr_t     fmsgbus_request    (fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_t const *req, fmsg_t *resp);
 
 #endif

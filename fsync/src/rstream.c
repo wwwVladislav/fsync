@@ -3,10 +3,13 @@
 #include <futils/queue.h>
 #include <fcommon/messages.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <errno.h>
+
+static struct timespec const F1_MSEC = { 0, 1000000 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // fristream
@@ -15,16 +18,17 @@ typedef struct
 {
     fistream_t          istream;
     volatile uint32_t   ref_counter;
+    volatile bool       is_open;
     uint32_t            id;
-    fuuid_t             source;
+    fuuid_t             src;
     fmsgbus_t          *msgbus;
     fmem_iostream_t    *memstream;
 } fristream_t;
 
 static fristream_t *fristream_retain(fristream_t *pstream);
-static void         fristream_release(fristream_t *pstream);
+static bool         fristream_release(fristream_t *pstream);
 
-static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *source)
+static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src)
 {
     fristream_t *pstream = (fristream_t*)malloc(sizeof(fristream_t));
     if (!pstream)
@@ -38,8 +42,9 @@ static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *sou
     pstream->istream.release = (fistream_release_fn_t)fristream_release;
 
     pstream->ref_counter = 1;
+    pstream->is_open = true;
     pstream->id = id;
-    pstream->source = *source;
+    pstream->src = *src;
     pstream->msgbus = fmsgbus_retain(msgbus);
     pstream->memstream = fmem_iostream(FMEM_BLOCK_SIZE);
 
@@ -62,7 +67,7 @@ static fristream_t *fristream_retain(fristream_t *pstream)
     return pstream;
 }
 
-void fristream_release(fristream_t *pstream)
+static bool fristream_release(fristream_t *pstream)
 {
     if (pstream)
     {
@@ -76,10 +81,18 @@ void fristream_release(fristream_t *pstream)
                 fmem_iostream_release(pstream->memstream);
             memset(pstream, 0, sizeof *pstream);
             free(pstream);
+            return true;
         }
     }
     else
         FS_ERR("Invalid istream");
+    return false;
+}
+
+static void fristream_close(fristream_t *pstream)
+{
+    pstream->is_open = false;
+    // TODO
 }
 
 //typedef size_t      (*fistream_read_fn_t)   (fistream_t *, char *, size_t);
@@ -87,7 +100,133 @@ void fristream_release(fristream_t *pstream)
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // frostream
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// TODO
+typedef struct
+{
+    fostream_t          ostream;
+    volatile uint32_t   ref_counter;
+    volatile bool       is_open;
+    uint32_t            id;
+    uint64_t            written_size;
+    fuuid_t             src;
+    fuuid_t             dst;
+    fmsgbus_t          *msgbus;
+} frostream_t;
+
+static frostream_t *frostream_retain (frostream_t *pstream);
+static bool         frostream_release(frostream_t *pstream);
+static size_t       frostream_write  (frostream_t *pstream, char const *data, size_t const size);
+
+static frostream_t *frostream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src, fuuid_t const *dst)
+{
+    frostream_t *pstream = (frostream_t*)malloc(sizeof(frostream_t));
+    if (!pstream)
+    {
+        FS_ERR("Unable to allocate memory for ostream");
+        return 0;
+    }
+    memset(pstream, 0, sizeof *pstream);
+
+    pstream->ostream.retain = (fostream_retain_fn_t)frostream_retain;
+    pstream->ostream.release = (fostream_release_fn_t)frostream_release;
+    pstream->ostream.write = (fostream_write_fn_t)frostream_write;
+
+    pstream->ref_counter = 1;
+    pstream->is_open = true;
+    pstream->id = id;
+    pstream->src = *src;
+    pstream->dst = *dst;
+    pstream->msgbus = fmsgbus_retain(msgbus);
+
+    return pstream;
+}
+
+static frostream_t *frostream_retain(frostream_t *pstream)
+{
+    if (pstream)
+        pstream->ref_counter++;
+    else
+        FS_ERR("Invalid ostream");
+    return pstream;
+}
+
+static bool frostream_release(frostream_t *pstream)
+{
+    if (pstream)
+    {
+        if (!pstream->ref_counter)
+            FS_ERR("Invalid ostream");
+        else if (!--pstream->ref_counter)
+        {
+            if (pstream->msgbus)
+                fmsgbus_release(pstream->msgbus);
+            memset(pstream, 0, sizeof *pstream);
+            free(pstream);
+            return true;
+        }
+    }
+    else
+        FS_ERR("Invalid ostream");
+    return false;
+}
+
+static void frostream_close(frostream_t *pstream)
+{
+    pstream->is_open = false;
+}
+
+static size_t frostream_write(frostream_t *pstream, char const *data, size_t const size)
+{
+    if (!pstream->is_open)
+    {
+        FS_WARN("Ostream is closed");
+        return 0;
+    }
+
+    if (!pstream)
+    {
+        FS_ERR("Invalid arguments");
+        return 0;
+    }
+
+    if (!data || !size)
+        return 0;
+
+    size_t written_size = 0;
+
+    while(written_size < size)
+    {
+        size_t const data_size = size - written_size;
+        size_t const block_size = data_size >= FSYNC_BLOCK_SIZE ? FSYNC_BLOCK_SIZE : data_size;
+
+        FMSG(stream_data, req, pstream->src, pstream->dst,
+            pstream->id,
+            pstream->written_size,
+            block_size
+        );
+        memcpy(req.data, data + written_size, block_size);
+
+        char src_str[2 * sizeof(fuuid_t) + 1] = { 0 };
+        char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
+        FS_INFO("Write: %s->%s [%u B]", fuuid2str(&pstream->src, src_str, sizeof src_str), fuuid2str(&pstream->dst, dst_str, sizeof dst_str), block_size);
+
+        switch(fmsgbus_publish(pstream->msgbus, FSTREAM_DATA, (fmsg_t const *)&req))
+        {
+            case FERR_NO_MEM:
+                return written_size;
+            case FSUCCESS:
+                break;
+            default:
+                FS_ERR("Unable to write ostream data");
+                frostream_close(pstream);
+                return 0;
+        }
+
+        pstream->written_size += block_size;
+        written_size += block_size;
+    }
+
+    return written_size;
+}
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // frstream factory
@@ -101,8 +240,11 @@ enum
 enum
 {
     FSTREAM_MSG_REQUEST = 0,
+    FSTREAM_MSG,
     FSTREAM_MSG_SUBSCRIBE_ISTREAM_LISTENER,
-    FSTREAM_MSG_UNSUBSCRIBE_ISTREAM_LISTENER
+    FSTREAM_MSG_SUBSCRIBE_OSTREAM_LISTENER,
+    FSTREAM_MSG_UNSUBSCRIBE_ISTREAM_LISTENER,
+    FSTREAM_MSG_UNSUBSCRIBE_OSTREAM_LISTENER
 };
 
 typedef struct
@@ -114,11 +256,43 @@ typedef struct
 typedef struct
 {
     uint32_t                type;
+    fuuid_t                 dst;
+    uint32_t                id;
+} frstream_msg_stream_t;
+
+typedef struct
+{
+    uint32_t                type;
     fristream_listener_t    listener;
     void                   *param;
     sem_t                  *sem;
     ferr_t                 *ret;
 } frstream_msg_subscribe_istream_listener_t;
+
+typedef struct
+{
+    uint32_t                type;
+    frostream_listener_t    listener;
+    void                   *param;
+    sem_t                  *sem;
+    ferr_t                 *ret;
+} frstream_msg_subscribe_ostream_listener_t;
+
+typedef struct
+{
+    uint32_t                type;
+    fristream_listener_t    listener;
+    sem_t                  *sem;
+    ferr_t                 *ret;
+} frstream_msg_unsubscribe_istream_listener_t;
+
+typedef struct
+{
+    uint32_t                type;
+    frostream_listener_t    listener;
+    sem_t                  *sem;
+    ferr_t                 *ret;
+} frstream_msg_unsubscribe_ostream_listener_t;
 
 typedef struct
 {
@@ -185,28 +359,125 @@ static ferr_t frstream_factory_subscribe_istream_listener_impl(frstream_factory_
     return FSUCCESS;
 }
 
-static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory, fuuid_t const *source)
+static ferr_t frstream_factory_subscribe_ostream_listener_impl(frstream_factory_t *pfactory, frostream_listener_t listener, void *param)
 {
-    uint32_t const id = ++pfactory->id;
+    int i = 0;
 
-    fristream_t *pistream = fristream(pfactory->msgbus, id, source);
-    if (!pistream)
+    for(; i < FSTREAM_MAX_HANDLERS; ++i)
     {
-        char str[2 * sizeof(fuuid_t) + 1] = { 0 };
-        FS_ERR("Input stream wasn't created. Source: %s", fuuid2str(source, str, sizeof str));
-        // TODO: Send error message to source
+        if (!pfactory->olisteners[i].listener)
+        {
+            pfactory->olisteners[i].param = param;
+            pfactory->olisteners[i].listener = listener;
+            break;
+        }
+    }
+
+    if (i >= FSTREAM_MAX_HANDLERS)
+    {
+        FS_ERR("No free space in ostream listeners table");
         return FFAIL;
     }
 
+    return FSUCCESS;
+}
+
+static ferr_t frstream_factory_unsubscribe_istream_listener_impl(frstream_factory_t *pfactory, fristream_listener_t listener)
+{
+    int i = 0;
+
+    for(; i < FSTREAM_MAX_HANDLERS; ++i)
+    {
+        if (pfactory->ilisteners[i].listener == listener)
+        {
+            pfactory->ilisteners[i].param = 0;
+            pfactory->ilisteners[i].listener = 0;
+            break;
+        }
+    }
+
+    if (i >= FSTREAM_MAX_HANDLERS)
+    {
+        FS_ERR("Istream listener not found in listeners table");
+        return FFAIL;
+    }
+
+    return FSUCCESS;
+}
+
+static ferr_t frstream_factory_unsubscribe_ostream_listener_impl(frstream_factory_t *pfactory, frostream_listener_t listener)
+{
+    int i = 0;
+
+    for(; i < FSTREAM_MAX_HANDLERS; ++i)
+    {
+        if (pfactory->olisteners[i].listener == listener)
+        {
+            pfactory->olisteners[i].param = 0;
+            pfactory->olisteners[i].listener = 0;
+            break;
+        }
+    }
+
+    if (i >= FSTREAM_MAX_HANDLERS)
+    {
+        FS_ERR("Ostream listener not found in listeners table");
+        return FFAIL;
+    }
+
+    return FSUCCESS;
+}
+
+static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory, fuuid_t const *source)
+{
     for(int i = 0; i < FSTREAM_MAX_HANDLERS; ++i)
     {
         if (pfactory->ilisteners[i].listener)
+        {
+            uint32_t const id = ++pfactory->id;
+            fristream_t *pistream = fristream(pfactory->msgbus, id, source);
+            if (!pistream) break;
             pfactory->ilisteners[i].listener(pfactory->ilisteners[i].param, (fistream_t*)pistream);
+            fristream_release(pistream);
+
+            // Send stream ID to source
+            FMSG(stream, req, pfactory->uuid, *source,
+                id
+            );
+
+            ferr_t rc = fmsgbus_publish(pfactory->msgbus, FSTREAM, (fmsg_t const *)&req);
+            if (rc != FSUCCESS)
+            {
+                fristream_close(pistream);
+                FS_ERR("Unable to publish stream");
+            }
+
+            return rc;
+        }
     }
 
-    fristream_release(pistream);
+    char str[2 * sizeof(fuuid_t) + 1] = { 0 };
+    FS_ERR("Input stream wasn't created. Source: %s", fuuid2str(source, str, sizeof str));
+    return FFAIL;
+}
 
-    return FSUCCESS;
+static ferr_t frstream_factory_stream_response_impl(frstream_factory_t *pfactory, fuuid_t const *dst, uint32_t id)
+{
+    for(int i = 0; i < FSTREAM_MAX_HANDLERS; ++i)
+    {
+        if (pfactory->olisteners[i].listener)
+        {
+            frostream_t *postream = frostream(pfactory->msgbus, id, &pfactory->uuid, dst);
+            if (!postream) break;
+            pfactory->olisteners[i].listener(pfactory->olisteners[i].param, (fostream_t*)postream);
+            frostream_release(postream);
+            return FSUCCESS;
+        }
+    }
+
+    char str[2 * sizeof(fuuid_t) + 1] = { 0 };
+    FS_ERR("output stream wasn't created. Destination: %s", fuuid2str(dst, str, sizeof str));
+    return FFAIL;
 }
 
 static void *frstream_factory_ctrl_thread(void *param)
@@ -234,7 +505,24 @@ static void *frstream_factory_ctrl_thread(void *param)
                 case FSTREAM_MSG_REQUEST:
                 {
                     frstream_msg_stream_request_t *msg = (frstream_msg_stream_request_t *)data;
-                    frstream_factory_stream_request_impl(pfactory, &msg->source);
+                    if (frstream_factory_stream_request_impl(pfactory, &msg->source) != FSUCCESS)
+                    {
+                        nanosleep(&F1_MSEC, NULL);
+                        sem_post(&pfactory->messages_sem);
+                    }
+                    fring_queue_pop_front(pfactory->messages);
+                    break;
+                }
+
+                case FSTREAM_MSG:
+                {
+                    frstream_msg_stream_t *msg = (frstream_msg_stream_t *)data;
+                    if (frstream_factory_stream_response_impl(pfactory, &msg->dst, msg->id) != FSUCCESS)
+                    {
+                        nanosleep(&F1_MSEC, NULL);
+                        sem_post(&pfactory->messages_sem);
+                    }
+                    fring_queue_pop_front(pfactory->messages);
                     break;
                 }
 
@@ -242,6 +530,33 @@ static void *frstream_factory_ctrl_thread(void *param)
                 {
                     frstream_msg_subscribe_istream_listener_t *msg = (frstream_msg_subscribe_istream_listener_t *)data;
                     *msg->ret = frstream_factory_subscribe_istream_listener_impl(pfactory, msg->listener, msg->param);
+                    sem_post(msg->sem);
+                    fring_queue_pop_front(pfactory->messages);
+                    break;
+                }
+
+                case FSTREAM_MSG_SUBSCRIBE_OSTREAM_LISTENER:
+                {
+                    frstream_msg_subscribe_ostream_listener_t *msg = (frstream_msg_subscribe_ostream_listener_t *)data;
+                    *msg->ret = frstream_factory_subscribe_ostream_listener_impl(pfactory, msg->listener, msg->param);
+                    sem_post(msg->sem);
+                    fring_queue_pop_front(pfactory->messages);
+                    break;
+                }
+
+                case FSTREAM_MSG_UNSUBSCRIBE_ISTREAM_LISTENER:
+                {
+                    frstream_msg_unsubscribe_istream_listener_t *msg = (frstream_msg_unsubscribe_istream_listener_t *)data;
+                    *msg->ret = frstream_factory_unsubscribe_istream_listener_impl(pfactory, msg->listener);
+                    sem_post(msg->sem);
+                    fring_queue_pop_front(pfactory->messages);
+                    break;
+                }
+
+                case FSTREAM_MSG_UNSUBSCRIBE_OSTREAM_LISTENER:
+                {
+                    frstream_msg_unsubscribe_ostream_listener_t *msg = (frstream_msg_unsubscribe_ostream_listener_t *)data;
+                    *msg->ret = frstream_factory_unsubscribe_ostream_listener_impl(pfactory, msg->listener);
                     sem_post(msg->sem);
                     fring_queue_pop_front(pfactory->messages);
                     break;
@@ -279,10 +594,31 @@ static void frstream_factory_stream_request(frstream_factory_t *pfactory, FMSG_T
     }
 }
 
-static void frstream_factory_stream(frstream_factory_t *pfactory, uint32_t msg_type, fmsg_stream_t const *msg, uint32_t size)
+static void frstream_factory_stream(frstream_factory_t *pfactory, FMSG_TYPE(stream) const *msg)
 {
-    int i = 0;
-    ++i;
+    if (memcmp(&msg->hdr.dst, &pfactory->uuid, sizeof pfactory->uuid) == 0)
+    {
+        frstream_msg_stream_t stream_msg =
+        {
+            FSTREAM_MSG,
+            msg->hdr.src,
+            msg->id
+        };
+
+        ferr_t ret;
+
+        frstream_factory_push_lock(pfactory->messages_mutex);
+        ret = fring_queue_push_back(pfactory->messages, &stream_msg, sizeof stream_msg);
+        frstream_factory_pop_lock();
+
+        if (ret == FSUCCESS)
+            sem_post(&pfactory->messages_sem);
+        else
+        {
+            char str[2 * sizeof(fuuid_t) + 1] = { 0 };
+            FS_ERR("Stream (dst %s) handler failed", fuuid2str(&stream_msg.dst, str, sizeof str));
+        }
+    }
 }
 
 static void frstream_factory_msgbus_retain(frstream_factory_t *pfactory, fmsgbus_t *pmsgbus)
@@ -384,7 +720,7 @@ void frstream_factory_release(frstream_factory_t *pfactory)
 }
 
 // src(ostream) ----> dst(istream)
-fostream_t *frstream_factory_ostream(frstream_factory_t *pfactory, fuuid_t const *dst)
+ferr_t frstream_factory_ostream(frstream_factory_t *pfactory, fuuid_t const *dst)
 {
     if (!pfactory || !dst)
     {
@@ -398,19 +734,11 @@ fostream_t *frstream_factory_ostream(frstream_factory_t *pfactory, fuuid_t const
     char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
     FS_INFO("Requesting stream. src=%s, dst=%s", fuuid2str(&pfactory->uuid, src_str, sizeof src_str), fuuid2str(dst, dst_str, sizeof dst_str));
 
-    FMSG(stream, stream_resp, FUUID(0), FUUID(0),
-        0
-    );
+    ferr_t rc = fmsgbus_publish(pfactory->msgbus, FSTREAM_REQUEST, (fmsg_t const *)&req);
+    if (rc != FSUCCESS)
+        FS_ERR("Stream wasn't requested");
 
-    if (fmsgbus_request(pfactory->msgbus, FSTREAM_REQUEST, (fmsg_t const *)&req, (fmsg_t *)&stream_resp) != FSUCCESS)
-        FS_ERR("Stream doesn't requested");
-
-    // fmsg_stream_request_t
-    // fmsg_stream_t
-
-    // TODO
-
-    return 0;
+    return rc;
 }
 
 ferr_t frstream_factory_istream_subscribe(frstream_factory_t *pfactory, fristream_listener_t istream_listener, void *param)
@@ -436,6 +764,148 @@ ferr_t frstream_factory_istream_subscribe(frstream_factory_t *pfactory, fristrea
         FSTREAM_MSG_SUBSCRIBE_ISTREAM_LISTENER,
         istream_listener,
         param,
+        &sem,
+        &result
+    };
+
+    frstream_factory_push_lock(pfactory->messages_mutex);
+    ret = fring_queue_push_back(pfactory->messages, &msg, sizeof msg);
+    frstream_factory_pop_lock();
+
+    if (ret == FSUCCESS)
+    {
+        sem_post(&pfactory->messages_sem);
+
+        // Waiting for completion
+        struct timespec tm = { time(0) + 1, 0 };
+        while(pfactory->ctrl_thread.is_active && sem_timedwait(&sem, &tm) == -1 && errno == EINTR)
+            continue;       // Restart if interrupted by handler
+
+        ret = result;
+    }
+
+    sem_destroy(&sem);
+
+    return ret;
+}
+
+ferr_t frstream_factory_ostream_subscribe(frstream_factory_t *pfactory, frostream_listener_t ostream_listener, void *param)
+{
+    if (!pfactory || !ostream_listener)
+    {
+        FS_ERR("Invalid arguments");
+        return FFAIL;
+    }
+
+    ferr_t ret;
+    sem_t  sem;
+    ferr_t result = FSUCCESS;
+
+    if (sem_init(&sem, 0, 0) == -1)
+    {
+        FS_ERR("The semaphore initialization is failed");
+        return FFAIL;
+    }
+
+    frstream_msg_subscribe_ostream_listener_t msg =
+    {
+        FSTREAM_MSG_SUBSCRIBE_OSTREAM_LISTENER,
+        ostream_listener,
+        param,
+        &sem,
+        &result
+    };
+
+    frstream_factory_push_lock(pfactory->messages_mutex);
+    ret = fring_queue_push_back(pfactory->messages, &msg, sizeof msg);
+    frstream_factory_pop_lock();
+
+    if (ret == FSUCCESS)
+    {
+        sem_post(&pfactory->messages_sem);
+
+        // Waiting for completion
+        struct timespec tm = { time(0) + 1, 0 };
+        while(pfactory->ctrl_thread.is_active && sem_timedwait(&sem, &tm) == -1 && errno == EINTR)
+            continue;       // Restart if interrupted by handler
+
+        ret = result;
+    }
+
+    sem_destroy(&sem);
+
+    return ret;
+}
+
+ferr_t frstream_factory_istream_unsubscribe(frstream_factory_t *pfactory, fristream_listener_t istream_listener)
+{
+    if (!pfactory || !istream_listener)
+    {
+        FS_ERR("Invalid arguments");
+        return FFAIL;
+    }
+
+    ferr_t ret;
+    sem_t  sem;
+    ferr_t result = FSUCCESS;
+
+    if (sem_init(&sem, 0, 0) == -1)
+    {
+        FS_ERR("The semaphore initialization is failed");
+        return FFAIL;
+    }
+
+    frstream_msg_unsubscribe_istream_listener_t msg =
+    {
+        FSTREAM_MSG_UNSUBSCRIBE_ISTREAM_LISTENER,
+        istream_listener,
+        &sem,
+        &result
+    };
+
+    frstream_factory_push_lock(pfactory->messages_mutex);
+    ret = fring_queue_push_back(pfactory->messages, &msg, sizeof msg);
+    frstream_factory_pop_lock();
+
+    if (ret == FSUCCESS)
+    {
+        sem_post(&pfactory->messages_sem);
+
+        // Waiting for completion
+        struct timespec tm = { time(0) + 1, 0 };
+        while(pfactory->ctrl_thread.is_active && sem_timedwait(&sem, &tm) == -1 && errno == EINTR)
+            continue;       // Restart if interrupted by handler
+
+        ret = result;
+    }
+
+    sem_destroy(&sem);
+
+    return ret;
+}
+
+ferr_t frstream_factory_ostream_unsubscribe(frstream_factory_t *pfactory, frostream_listener_t ostream_listener)
+{
+    if (!pfactory || !ostream_listener)
+    {
+        FS_ERR("Invalid arguments");
+        return FFAIL;
+    }
+
+    ferr_t ret;
+    sem_t  sem;
+    ferr_t result = FSUCCESS;
+
+    if (sem_init(&sem, 0, 0) == -1)
+    {
+        FS_ERR("The semaphore initialization is failed");
+        return FFAIL;
+    }
+
+    frstream_msg_unsubscribe_ostream_listener_t msg =
+    {
+        FSTREAM_MSG_UNSUBSCRIBE_OSTREAM_LISTENER,
+        ostream_listener,
         &sem,
         &result
     };

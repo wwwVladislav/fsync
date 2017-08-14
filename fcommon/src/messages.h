@@ -12,7 +12,8 @@ typedef enum
     FFILE_PART_REQUEST,
     FFILE_PART,
     FSTREAM_REQUEST,
-    FSTREAM
+    FSTREAM,
+    FSTREAM_DATA
 } fmessage_t;
 
 enum
@@ -56,7 +57,14 @@ FMSG_DEF(stream_request,
 )
 
 FMSG_DEF(stream,
-    uint32_t                id;
+    uint32_t                id;                     // stream id
+)
+
+FMSG_DEF(stream_data,
+    uint32_t                id;                     // stream id
+    uint64_t                offset;                 // offset
+    uint16_t                size;                   // data size
+    uint8_t                 data[FSYNC_BLOCK_SIZE]; // data
 )
 
 #endif

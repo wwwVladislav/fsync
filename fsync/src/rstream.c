@@ -106,13 +106,15 @@ typedef struct
     volatile uint32_t   ref_counter;
     volatile bool       is_open;
     uint32_t            id;
+    uint64_t            written_size;
     fuuid_t             src;
     fuuid_t             dst;
     fmsgbus_t          *msgbus;
 } frostream_t;
 
-static frostream_t *frostream_retain(frostream_t *pstream);
+static frostream_t *frostream_retain (frostream_t *pstream);
 static bool         frostream_release(frostream_t *pstream);
+static size_t       frostream_write  (frostream_t *pstream, char const *data, size_t const size);
 
 static frostream_t *frostream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src, fuuid_t const *dst)
 {
@@ -126,6 +128,7 @@ static frostream_t *frostream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src
 
     pstream->ostream.retain = (fostream_retain_fn_t)frostream_retain;
     pstream->ostream.release = (fostream_release_fn_t)frostream_release;
+    pstream->ostream.write = (fostream_write_fn_t)frostream_write;
 
     pstream->ref_counter = 1;
     pstream->is_open = true;
@@ -164,6 +167,65 @@ static bool frostream_release(frostream_t *pstream)
     else
         FS_ERR("Invalid ostream");
     return false;
+}
+
+static void frostream_close(frostream_t *pstream)
+{
+    pstream->is_open = false;
+}
+
+static size_t frostream_write(frostream_t *pstream, char const *data, size_t const size)
+{
+    if (!pstream->is_open)
+    {
+        FS_WARN("Ostream is closed");
+        return 0;
+    }
+
+    if (!pstream)
+    {
+        FS_ERR("Invalid arguments");
+        return 0;
+    }
+
+    if (!data || !size)
+        return 0;
+
+    size_t written_size = 0;
+
+    while(written_size < size)
+    {
+        size_t const data_size = size - written_size;
+        size_t const block_size = data_size >= FSYNC_BLOCK_SIZE ? FSYNC_BLOCK_SIZE : data_size;
+
+        FMSG(stream_data, req, pstream->src, pstream->dst,
+            pstream->id,
+            pstream->written_size,
+            block_size
+        );
+        memcpy(req.data, data + written_size, block_size);
+
+        char src_str[2 * sizeof(fuuid_t) + 1] = { 0 };
+        char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
+        FS_INFO("Write: %s->%s [%u B]", fuuid2str(&pstream->src, src_str, sizeof src_str), fuuid2str(&pstream->dst, dst_str, sizeof dst_str), block_size);
+
+        switch(fmsgbus_publish(pstream->msgbus, FSTREAM_DATA, (fmsg_t const *)&req))
+        {
+            case FERR_NO_MEM:
+                return written_size;
+            case FSUCCESS:
+                break;
+            default:
+                FS_ERR("Unable to write ostream data");
+                frostream_close(pstream);
+                return 0;
+        }
+
+        pstream->written_size += block_size;
+        written_size += block_size;
+    }
+
+    return written_size;
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

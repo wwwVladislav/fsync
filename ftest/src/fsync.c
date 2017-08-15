@@ -257,12 +257,17 @@ static void frsync_test()
 // rstream test
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-static void fristream_listener(void *ptr, fistream_t *pistream)
+static fistream_t *pistream = 0;
+static fostream_t *postream = 0;
+
+static void fristream_listener(void *ptr, fistream_t *pstream)
 {
+    pistream = pstream->retain(pstream);
 }
 
-static void frostream_listener(void *ptr, fostream_t *postream)
+static void frostream_listener(void *ptr, fostream_t *pstream)
 {
+    postream = pstream->retain(pstream);
 }
 
 void frstream_test()
@@ -285,6 +290,10 @@ void frstream_test()
         static struct timespec const F5_SEC = { 5, 0 };
         nanosleep(&F5_SEC, NULL);
 
+        rc = frstream_factory_istream_unsubscribe(rstream_factory, fristream_listener);     assert(rc == FSUCCESS);
+        rc = frstream_factory_ostream_unsubscribe(rstream_factory, frostream_listener);     assert(rc == FSUCCESS);
+        if (pistream) pistream->release(pistream);
+        if (postream) postream->release(postream);
         frstream_factory_release(rstream_factory);
     }
     fmsgbus_release(msgbus);

@@ -287,10 +287,16 @@ void frstream_test()
         rc = frstream_factory_ostream_subscribe(rstream_factory, frostream_listener, 0);    assert(rc == FSUCCESS);
         rc = frstream_factory_ostream(rstream_factory, &uuid);                              assert(rc == FSUCCESS);
 
-        static struct timespec const F5_SEC = { 5, 0 };
-        nanosleep(&F5_SEC, NULL);
+        while (!postream || !pistream)
+        {
+            static struct timespec const F1_SEC = { 1, 0 };
+            nanosleep(&F1_SEC, NULL);
+        }
 
         size_t written = postream->write(postream, FDATA, sizeof FDATA);                    assert(written == sizeof FDATA);
+
+        char tmp[sizeof FDATA] = { 0 };
+        size_t read_size = pistream->read(pistream, tmp, sizeof tmp);                       //assert(read_size == sizeof tmp);
 
         rc = frstream_factory_istream_unsubscribe(rstream_factory, fristream_listener);     assert(rc == FSUCCESS);
         rc = frstream_factory_ostream_unsubscribe(rstream_factory, frostream_listener);     assert(rc == FSUCCESS);

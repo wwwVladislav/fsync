@@ -16,19 +16,48 @@ static struct timespec const F1_MSEC = { 0, 1000000 };
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 typedef struct
 {
-    fistream_t          istream;
-    volatile uint32_t   ref_counter;
-    volatile bool       is_open;
-    uint32_t            id;
-    fuuid_t             src;
-    fmsgbus_t          *msgbus;
-    fmem_iostream_t    *memstream;
+    fistream_t          istream;        // base istream structure
+    volatile uint32_t   ref_counter;    // References counter
+    volatile bool       is_open;        // open/closed flag
+    uint32_t            id;             // stream id
+    uint64_t            read_size;      // read size
+    fuuid_t             src;            // source address
+    fuuid_t             dst;            // destination address
+    fmsgbus_t          *msgbus;         // Messages bus
+    fistream_t         *pin;            // input stream
+    fostream_t         *pout;           // output stream
 } fristream_t;
 
-static fristream_t *fristream_retain(fristream_t *pstream);
+static fristream_t *fristream_retain (fristream_t *pstream);
 static bool         fristream_release(fristream_t *pstream);
+static size_t       fristream_read   (fristream_t *pstream, char *data, size_t size);
 
-static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src)
+static void fristream_data(fristream_t *pstream, FMSG_TYPE(stream_data) const *msg)
+{
+    if (msg->id == pstream->id
+        && memcmp(&msg->hdr.src, &pstream->src, sizeof pstream->src) == 0)
+    {
+        char src_str[2 * sizeof(fuuid_t) + 1] = { 0 };
+        char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
+        FS_INFO("Received: %s<-%s [%u B]", fuuid2str(&pstream->dst, dst_str, sizeof dst_str), fuuid2str(&pstream->src, src_str, sizeof src_str), msg->size);
+
+        // TODO
+    }
+}
+
+static void fristream_msgbus_retain(fristream_t *pstream, fmsgbus_t *pmsgbus)
+{
+    pstream->msgbus = fmsgbus_retain(pmsgbus);
+    fmsgbus_subscribe(pmsgbus, FSTREAM_DATA, (fmsg_handler_t)fristream_data, pstream);
+}
+
+static void fristream_msgbus_release(fristream_t *pstream)
+{
+    fmsgbus_unsubscribe(pstream->msgbus, FSTREAM_DATA, (fmsg_handler_t)fristream_data);
+    fmsgbus_release(pstream->msgbus);
+}
+
+static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src, fuuid_t const *dst)
 {
     fristream_t *pstream = (fristream_t*)malloc(sizeof(fristream_t));
     if (!pstream)
@@ -40,20 +69,42 @@ static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src
 
     pstream->istream.retain = (fistream_retain_fn_t)fristream_retain;
     pstream->istream.release = (fistream_release_fn_t)fristream_release;
+    pstream->istream.read = (fistream_read_fn_t)fristream_read;
 
     pstream->ref_counter = 1;
     pstream->is_open = true;
     pstream->id = id;
     pstream->src = *src;
-    pstream->msgbus = fmsgbus_retain(msgbus);
-    pstream->memstream = fmem_iostream(FMEM_BLOCK_SIZE);
+    pstream->dst = *dst;
+    fristream_msgbus_retain(pstream, msgbus);
 
-    if (!pstream->memstream)
+    fmem_iostream_t *memstream = fmem_iostream(FMEM_BLOCK_SIZE);
+    if (!memstream)
     {
         FS_ERR("Unable to allocate memory stream");
         fristream_release(pstream);
         return 0;
     }
+
+    pstream->pin = fmem_istream(memstream);
+    if (!pstream->pin)
+    {
+        FS_ERR("Unable to request istream interface for memory stream");
+        fmem_iostream_release(memstream);
+        fristream_release(pstream);
+        return 0;
+    }
+
+    pstream->pout = fmem_ostream(memstream);
+    if (!pstream->pout)
+    {
+        FS_ERR("Unable to request ostream interface for memory stream");
+        fmem_iostream_release(memstream);
+        fristream_release(pstream);
+        return 0;
+    }
+
+    fmem_iostream_release(memstream);
 
     return pstream;
 }
@@ -76,9 +127,11 @@ static bool fristream_release(fristream_t *pstream)
         else if (!--pstream->ref_counter)
         {
             if (pstream->msgbus)
-                fmsgbus_release(pstream->msgbus);
-            if (pstream->memstream)
-                fmem_iostream_release(pstream->memstream);
+                fristream_msgbus_release(pstream);
+            if (pstream->pin)
+                pstream->pin->release(pstream->pin);
+            if (pstream->pout)
+                pstream->pout->release(pstream->pout);
             memset(pstream, 0, sizeof *pstream);
             free(pstream);
             return true;
@@ -95,21 +148,41 @@ static void fristream_close(fristream_t *pstream)
     // TODO
 }
 
-//typedef size_t      (*fistream_read_fn_t)   (fistream_t *, char *, size_t);
+static size_t fristream_read(fristream_t *pstream, char *data, size_t size)
+{
+    if (!pstream->is_open)
+    {
+        FS_WARN("Istream is closed");
+        return 0;
+    }
+
+    if (!pstream)
+    {
+        FS_ERR("Invalid arguments");
+        return 0;
+    }
+
+    if (!data || !size)
+        return 0;
+
+    // TODO
+
+    return 0;
+}
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // frostream
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 typedef struct
 {
-    fostream_t          ostream;
-    volatile uint32_t   ref_counter;
-    volatile bool       is_open;
-    uint32_t            id;
-    uint64_t            written_size;
-    fuuid_t             src;
-    fuuid_t             dst;
-    fmsgbus_t          *msgbus;
+    fostream_t          ostream;        // base ostream structure
+    volatile uint32_t   ref_counter;    // References counter
+    volatile bool       is_open;        // open/closed flag
+    uint32_t            id;             // stream id
+    uint64_t            written_size;   // written size
+    fuuid_t             src;            // source address
+    fuuid_t             dst;            // destination address
+    fmsgbus_t          *msgbus;         // Messages bus
 } frostream_t;
 
 static frostream_t *frostream_retain (frostream_t *pstream);
@@ -435,7 +508,7 @@ static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory,
         if (pfactory->ilisteners[i].listener)
         {
             uint32_t const id = ++pfactory->id;
-            fristream_t *pistream = fristream(pfactory->msgbus, id, source);
+            fristream_t *pistream = fristream(pfactory->msgbus, id, source, &pfactory->uuid);
             if (!pistream) break;
             pfactory->ilisteners[i].listener(pfactory->ilisteners[i].param, (fistream_t*)pistream);
             fristream_release(pistream);

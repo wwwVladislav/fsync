@@ -137,8 +137,9 @@ static size_t fmem_iostream_read(fmem_iostream_t *piostream, char *data, size_t 
     while (piostream->data_size && read_size < size)
     {
         size_t const block_data_size = piostream->block_size - piostream->offset;
+        size_t const block_available_size = block_data_size < piostream->data_size ? block_data_size : piostream->data_size;
         size_t const need_size = size - read_size;
-        size_t const r_size = block_data_size < need_size ? block_data_size : need_size;
+        size_t const r_size = block_available_size < need_size ? block_available_size : need_size;
 
         char *block = *(char**)fvector_at(piostream->blocks, 0);
         if (!block)

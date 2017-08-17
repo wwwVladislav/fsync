@@ -296,7 +296,8 @@ void frstream_test()
         size_t written = postream->write(postream, FDATA, sizeof FDATA);                    assert(written == sizeof FDATA);
 
         char tmp[sizeof FDATA] = { 0 };
-        size_t read_size = pistream->read(pistream, tmp, sizeof tmp);                       //assert(read_size == sizeof tmp);
+        size_t read_size = pistream->read(pistream, tmp, sizeof tmp);                       assert(read_size == sizeof tmp);
+        assert(memcmp(FDATA, tmp, sizeof FDATA) == 0);
 
         rc = frstream_factory_istream_unsubscribe(rstream_factory, fristream_listener);     assert(rc == FSUCCESS);
         rc = frstream_factory_ostream_unsubscribe(rstream_factory, frostream_listener);     assert(rc == FSUCCESS);

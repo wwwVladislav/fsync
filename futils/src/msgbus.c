@@ -1,5 +1,6 @@
 #include "msgbus.h"
 #include "queue.h"
+#include "mutex.h"
 #include "log.h"
 #include <stdlib.h>
 #include <stddef.h>
@@ -47,6 +48,7 @@ typedef struct
 typedef struct
 {
     uint32_t        msg_type;
+    pthread_mutex_t mutex;
     fmsg_handler_t  handler;
     void           *param;
 } fmsgbus_handler_t;
@@ -92,14 +94,6 @@ struct fmsgbus
     fmsgbus_thread_t      threads[FMSGBUS_MAX_THREADS];
 };
 
-#define fmsgbus_push_lock(mutex)                    \
-    if (pthread_mutex_lock(&mutex))	            \
-        FS_ERR("The mutex locking is failed");      \
-    else                                            \
-        pthread_cleanup_push((void (*)())pthread_mutex_unlock, (void *)&mutex);
-
-#define fmsgbus_pop_lock() pthread_cleanup_pop(1)
-
 static bool fmsgbus_msg_handle(fmsgbus_t *msgbus, uint32_t msg_type, fmsg_t *msg)
 {
     for(uint32_t thread_id = 0; thread_id < FMSGBUS_MAX_THREADS; ++thread_id)
@@ -126,9 +120,11 @@ static ferr_t fmsgbus_subscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg
     {
         if (!pmsgbus->handlers[i].handler)
         {
+            fpush_lock(pmsgbus->handlers[i].mutex);
             pmsgbus->handlers[i].param = param;
             pmsgbus->handlers[i].handler = handler;
             pmsgbus->handlers[i].msg_type = msg_type;
+            fpop_lock();
             break;
         }
     }
@@ -151,16 +147,18 @@ static ferr_t fmsgbus_unsubscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fm
         if (pmsgbus->handlers[i].handler == handler
             && pmsgbus->handlers[i].msg_type == msg_type)
         {
+            fpush_lock(pmsgbus->handlers[i].mutex);
             pmsgbus->handlers[i].param = 0;
             pmsgbus->handlers[i].handler = 0;
             pmsgbus->handlers[i].msg_type = 0;
+            fpop_lock();
             break;
         }
     }
 
     if (i >= FMSGBUS_MAX_HANDLERS)
     {
-        FS_ERR("Message handler not found in handlers table");
+        FS_WARN("Message handler not found in handlers table");
         return FFAIL;
     }
 
@@ -252,9 +250,11 @@ static void *fmsgbus_thread(void *param)
         {
             fmsgbus_handler_t *handler = &msgbus->handlers[i];
 
+            fpush_lock(handler->mutex);
             if (handler->msg_type == thread->msg_type
                 && handler->handler)
                 handler->handler(handler->param, thread->msg);
+            fpop_lock();
         }
 
         free(thread->msg);
@@ -282,9 +282,10 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus)
     memset(pmsgbus, 0, sizeof(fmsgbus_t));
 
     pmsgbus->ref_counter = 1;
+    pmsgbus->messages_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-    static pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
-    pmsgbus->messages_mutex = mutex_initializer;
+    for(int i = 0; i < FMSGBUS_MAX_HANDLERS; ++i)
+        pmsgbus->handlers[i].mutex = PTHREAD_MUTEX_INITIALIZER;
 
     if (sem_init(&pmsgbus->messages_sem, 0, 0) == -1)
     {
@@ -411,9 +412,9 @@ ferr_t fmsgbus_subscribe(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t h
         &result
     };
 
-    fmsgbus_push_lock(pmsgbus->messages_mutex);
+    fpush_lock(pmsgbus->messages_mutex);
     ret = fring_queue_push_back(pmsgbus->messages, &msg, sizeof msg);
-    fmsgbus_pop_lock();
+    fpop_lock();
 
     if (ret == FSUCCESS)
     {
@@ -460,9 +461,9 @@ ferr_t fmsgbus_unsubscribe(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t
         &result
     };
 
-    fmsgbus_push_lock(pmsgbus->messages_mutex);
+    fpush_lock(pmsgbus->messages_mutex);
     ret = fring_queue_push_back(pmsgbus->messages, &msg, sizeof msg);
-    fmsgbus_pop_lock();
+    fpop_lock();
 
     if (ret == FSUCCESS)
     {
@@ -506,9 +507,9 @@ ferr_t fmsgbus_publish(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_t const *msg)
 
     memcpy(cmsg.msg, msg, msg->size);
 
-    fmsgbus_push_lock(pmsgbus->messages_mutex);
+    fpush_lock(pmsgbus->messages_mutex);
     ret = fring_queue_push_back(pmsgbus->messages, &cmsg, sizeof cmsg);
-    fmsgbus_pop_lock();
+    fpop_lock();
 
     if (ret == FSUCCESS)
         sem_post(&pmsgbus->messages_sem);

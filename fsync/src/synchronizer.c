@@ -2,6 +2,7 @@
 #include "file_assembler.h"
 #include <futils/log.h>
 #include <futils/vector.h>
+#include <futils/mutex.h>
 #include <fdb/sync/nodes.h>
 #include <fdb/sync/statuses.h>
 #include <fdb/sync/sync_files.h>
@@ -13,14 +14,6 @@
 #include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
-
-#define fsync_push_lock(mutex)                      \
-    if (pthread_mutex_lock(&mutex))	            \
-        FS_ERR("The mutex locking is failed");      \
-    else                                            \
-        pthread_cleanup_push((void (*)())pthread_mutex_unlock, (void *)&mutex);
-
-#define fsync_pop_lock() pthread_cleanup_pop(1);
 
 enum
 {
@@ -102,7 +95,7 @@ static void fsynchronizer_file_part_handler(fsynchronizer_t *psynchronizer, FMSG
             FS_ERR("Unknown file part was received");
         else
         {
-            fsync_push_lock(psynchronizer->mutex);
+            fpush_lock(psynchronizer->mutex);
 
             fsynchronizer_file_t const file_id = { id };
             fsynchronizer_file_t *sync_file = (fsynchronizer_file_t *)fvector_bsearch(psynchronizer->sync_files, &file_id, fsynchronizer_file_cmp);
@@ -114,7 +107,7 @@ static void fsynchronizer_file_part_handler(fsynchronizer_t *psynchronizer, FMSG
             }
             else FS_ERR("Unknown file part was received");
 
-            fsync_pop_lock();
+            fpop_lock();
         }
     }
 }
@@ -192,7 +185,7 @@ static bool fsynchronizer_update_sync_files_list(fsynchronizer_t *psynchronizer)
                                     break;
                                 }
 
-                                fsync_push_lock(psynchronizer->mutex);
+                                fpush_lock(psynchronizer->mutex);
 
                                 fsynchronizer_file_t const sync_file = { id, file_info.size, file_srcs, requested_parts, fassembler };
                                 if (!fvector_push_back(&psynchronizer->sync_files, &sync_file))
@@ -204,7 +197,7 @@ static bool fsynchronizer_update_sync_files_list(fsynchronizer_t *psynchronizer)
                                     ret = false;
                                 }
 
-                                fsync_pop_lock();
+                                fpop_lock();
 
                                 if (!ret)
                                     break;
@@ -273,9 +266,9 @@ static bool fsynchronizer_update_sync_files_list(fsynchronizer_t *psynchronizer)
 
     if (ret)
     {
-        fsync_push_lock(psynchronizer->mutex);
+        fpush_lock(psynchronizer->mutex);
         fvector_qsort(psynchronizer->sync_files, fsynchronizer_file_cmp);
-        fsync_pop_lock();
+        fpop_lock();
     }
 
     return ret;
@@ -318,8 +311,7 @@ fsynchronizer_t *fsynchronizer_create(fmsgbus_t *pmsgbus, fdb_t *db, fuuid_t con
         return 0;
     }
 
-    static pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
-    psynchronizer->mutex = mutex_initializer;
+    psynchronizer->mutex = PTHREAD_MUTEX_INITIALIZER;
 
     if (!fsynchronizer_update_sync_files_list(psynchronizer))
     {
@@ -334,7 +326,7 @@ void fsynchronizer_free(fsynchronizer_t *psynchronizer)
 {
     if (psynchronizer)
     {
-        fsync_push_lock(psynchronizer->mutex);
+        fpush_lock(psynchronizer->mutex);
 
         fsynchronizer_file_t *sync_files = (fsynchronizer_file_t *)fvector_ptr(psynchronizer->sync_files);
         for(size_t i = 0; i < fvector_size(psynchronizer->sync_files); ++i)
@@ -347,7 +339,7 @@ void fsynchronizer_free(fsynchronizer_t *psynchronizer)
         fvector_release(psynchronizer->sync_files);
         psynchronizer->sync_files = 0;
 
-        fsync_pop_lock();
+        fpop_lock();
 
         fsynchronizer_msgbus_release(psynchronizer);
         fdb_release(psynchronizer->db);
@@ -403,7 +395,7 @@ bool fsynchronizer_update(fsynchronizer_t *psynchronizer)
 
     time_t const now = time(0);
 
-    fsync_push_lock(psynchronizer->mutex);
+    fpush_lock(psynchronizer->mutex);
 
     fsynchronizer_file_t *sync_files = (fsynchronizer_file_t *)fvector_ptr(psynchronizer->sync_files);
     size_t const sync_files_size = fvector_size(psynchronizer->sync_files);
@@ -448,7 +440,7 @@ bool fsynchronizer_update(fsynchronizer_t *psynchronizer)
     if (ready_files_num)
         fsynchronizer_cleanup_ready_files_info(psynchronizer);
 
-    fsync_pop_lock();
+    fpop_lock();
 
     return ret;
 }

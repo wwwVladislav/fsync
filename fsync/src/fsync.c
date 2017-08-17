@@ -55,14 +55,6 @@ struct fsync
     fdb_t               *db;
 };
 
-#define fsync_push_lock(mutex)                      \
-    if (pthread_mutex_lock(&mutex))	            \
-        FS_ERR("The mutex locking is failed");      \
-    else                                            \
-        pthread_cleanup_push((void (*)())pthread_mutex_unlock, (void *)&mutex);
-
-#define fsync_pop_lock() pthread_cleanup_pop(1);
-
 static void fsdir_evt_handler(fsdir_event_t const *event, void *arg)
 {
     fsync_t *psync = (fsync_t*)arg;

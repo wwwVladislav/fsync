@@ -147,8 +147,7 @@ fnet_ssl_client_t *fnet_ssl_connect(char const *addr)
     }
     memset(pclient, 0, sizeof *pclient);
 
-    static pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
-    pclient->mutex = mutex_initializer;
+    pclient->mutex = PTHREAD_MUTEX_INITIALIZER;
 
     if (!fnet_ssl_module_init(&fnet_ssl_module))
     {
@@ -239,8 +238,7 @@ static void fnet_tcp_clients_accepter(fnet_tcp_server_t const *tcp_server, fnet_
             }
             memset(pclient, 0, sizeof *pclient);
 
-            static pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
-            pclient->mutex = mutex_initializer;
+            pclient->mutex = PTHREAD_MUTEX_INITIALIZER;
 
             pclient->tcp_client = tcp_client;
 

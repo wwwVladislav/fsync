@@ -2,6 +2,7 @@
 #include "protocol.h"
 #include <fnet/transport.h>
 #include <futils/log.h>
+#include <futils/mutex.h>
 #include <fcommon/messages.h>
 #include <fdb/sync/nodes.h>
 #include <stdlib.h>
@@ -32,14 +33,6 @@ struct filink
     fmsgbus_t            *msgbus;
     fdb_t                *db;
 };
-
-#define filink_push_lock(mutex)                     \
-    if (pthread_mutex_lock(&mutex))	            \
-        FS_ERR("The mutex locking is failed");      \
-    else                                            \
-        pthread_cleanup_push((void (*)())pthread_mutex_unlock, (void *)&mutex);
-
-#define filink_pop_lock() pthread_cleanup_pop(1);
 
 static uint32_t filink_status_to_proto(uint32_t status)
 {
@@ -84,7 +77,7 @@ static bool filink_add_node(filink_t *ilink, fnet_client_t *pclient, fuuid_t con
 
     bool ret = true;
 
-    filink_push_lock(ilink->nodes_mutex);
+    fpush_lock(ilink->nodes_mutex);
     if (ilink->nodes_num < FMAX_CONNECTIONS_NUM)
     {
         for(size_t i = 0; i < ilink->nodes_num; ++i)
@@ -111,13 +104,13 @@ static bool filink_add_node(filink_t *ilink, fnet_client_t *pclient, fuuid_t con
         ret = false;
         FS_ERR("The maximum allowed connections number is reached");
     }
-    filink_pop_lock();
+    fpop_lock();
     return ret;
 }
 
 static void filink_remove_node(filink_t *ilink, fnet_client_t *pclient)
 {
-    filink_push_lock(ilink->nodes_mutex);
+    fpush_lock(ilink->nodes_mutex);
     size_t i = 0;
     for(; i < ilink->nodes_num; ++i)
     {
@@ -133,23 +126,23 @@ static void filink_remove_node(filink_t *ilink, fnet_client_t *pclient)
     ilink->nodes_num--;
     ilink->nodes[ilink->nodes_num].transport = 0;
 
-    filink_pop_lock();
+    fpop_lock();
 }
 
 static void filink_broadcast_message(filink_t *ilink, fproto_msg_t msg, void const *data)
 {
-    filink_push_lock(ilink->nodes_mutex);
+    fpush_lock(ilink->nodes_mutex);
     for(size_t i = 0; i < ilink->nodes_num; ++i)
     {
         if (ilink->nodes[i].transport && !fproto_send(ilink->nodes[i].transport, msg, (uint8_t const *)data))
             FS_ERR("The broadcast message wasn't send");
     }
-    filink_pop_lock();
+    fpop_lock();
 }
 
 static void filink_send_message(filink_t *ilink, fuuid_t const *destination, fproto_msg_t msg, void const *data)
 {
-    filink_push_lock(ilink->nodes_mutex);
+    fpush_lock(ilink->nodes_mutex);
     for(size_t i = 0; i < ilink->nodes_num; ++i)
     {
         if (ilink->nodes[i].transport && memcmp(&ilink->nodes[i].uuid, destination, sizeof *destination) == 0)
@@ -159,7 +152,7 @@ static void filink_send_message(filink_t *ilink, fuuid_t const *destination, fpr
             break;
         }
     }
-    filink_pop_lock();
+    fpop_lock();
 }
 
 static void filink_status_handler(filink_t *ilink, FMSG_TYPE(node_status) const *msg)
@@ -340,12 +333,12 @@ static void *filink_thread(void *param)
 
     while(ilink->is_active)
     {
-        filink_push_lock(ilink->nodes_mutex);
+        fpush_lock(ilink->nodes_mutex);
         ilink->wait_handler = fnet_wait_handler();
         for(size_t i = 0; i < ilink->nodes_num; ++i)
             clients[i] = ilink->nodes[i].transport;
         clients_num = ilink->nodes_num;
-        filink_pop_lock();
+        fpop_lock();
 
         bool ret = fnet_select(clients,
                                clients_num,
@@ -436,8 +429,7 @@ filink_t *filink_bind(fmsgbus_t *pmsgbus, fdb_t *db, char const *addr, fuuid_t c
 
     ilink->nodes_num = 0;
 
-    static pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
-    ilink->nodes_mutex = mutex_initializer;
+    ilink->nodes_mutex = PTHREAD_MUTEX_INITIALIZER;
 
     int rc = pthread_create(&ilink->thread, 0, filink_thread, (void*)ilink);
     if (rc)

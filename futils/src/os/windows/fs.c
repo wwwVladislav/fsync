@@ -1,5 +1,6 @@
 #include "../../fs.h"
 #include "../../log.h"
+#include "../../mutex.h"
 
 #ifndef _WIN32_WINNT
 #   define WIN32_LEAN_AND_MEAN
@@ -40,14 +41,6 @@ struct fsdir_listener
     fsdir_evt_handler_t handlers[FSDIR_MAX_HANDLERS];
     void*               args[FSDIR_MAX_HANDLERS];
 };
-
-#define fsdir_push_lock(mutex)                      \
-    if (pthread_mutex_lock(&mutex))	            \
-        FS_ERR("The mutex locking is failed");      \
-    else                                            \
-        pthread_cleanup_push((void (*)())pthread_mutex_unlock, (void *)&mutex);
-
-#define fsdir_pop_lock() pthread_cleanup_pop(1);
 
 static DWORD const FSDIR_FILTER = FILE_NOTIFY_CHANGE_FILE_NAME
                                   | FILE_NOTIFY_CHANGE_DIR_NAME
@@ -147,13 +140,13 @@ static void *fsdir_listener_thread(void *param)
                         path[len] = 0;
                         dir->event.action = fsdir_event_convert(event->Action);
 
-                        fsdir_push_lock(listener->handlers_mutex);
+                        fpush_lock(listener->handlers_mutex);
                         for (unsigned i = 0; i < FSDIR_MAX_HANDLERS; ++i)
                         {
                             if (listener->handlers[i])
                                 listener->handlers[i](&dir->event, listener->args[i]);
                         }
-                        fsdir_pop_lock();
+                        fpop_lock();
 
                         offset += event->NextEntryOffset;
                     }
@@ -180,13 +173,13 @@ static void *fsdir_listener_thread(void *param)
                 // Directory was reopened. We should notify about it.
                 dir->event.action = FSDIR_ACTION_REOPENED;
 
-                fsdir_push_lock(listener->handlers_mutex);
+                fpush_lock(listener->handlers_mutex);
                 for (unsigned i = 0; i < FSDIR_MAX_HANDLERS; ++i)
                 {
                     if (listener->handlers[i])
                         listener->handlers[i](&dir->event, listener->args[i]);
                 }
-                fsdir_pop_lock();
+                fpop_lock();
             }
 
             memset(dir->data, 0, sizeof dir->data);
@@ -225,8 +218,7 @@ fsdir_listener_t *fsdir_listener_create()
         listener->dirs[i].dir = INVALID_HANDLE_VALUE;
     }
 
-    static pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
-    listener->handlers_mutex = mutex_initializer;
+    listener->handlers_mutex = PTHREAD_MUTEX_INITIALIZER;
 
     listener->iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0);
     if (!listener->iocp)
@@ -333,7 +325,7 @@ bool fsdir_listener_reg_handler(fsdir_listener_t *listener, fsdir_evt_handler_t 
     if (!listener) return false;
     bool ret = false;
 
-    fsdir_push_lock(listener->handlers_mutex);
+    fpush_lock(listener->handlers_mutex);
     for (unsigned i = 0; i < FSDIR_MAX_HANDLERS; ++i)
     {
         if (!listener->handlers[i])
@@ -344,7 +336,7 @@ bool fsdir_listener_reg_handler(fsdir_listener_t *listener, fsdir_evt_handler_t 
             break;
         }
     }
-    fsdir_pop_lock();
+    fpop_lock();
 
     if (!ret)
         FS_ERR("The maximum number of event handlers was reached.");

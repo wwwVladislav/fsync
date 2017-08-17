@@ -1,6 +1,7 @@
 #include "rstream.h"
 #include <futils/log.h>
 #include <futils/queue.h>
+#include <futils/mutex.h>
 #include <fcommon/messages.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -10,6 +11,8 @@
 #include <errno.h>
 
 static struct timespec const F1_MSEC = { 0, 1000000 };
+static struct timespec const F100_MSEC = { 0, 100000000 };
+static const int FSTREAM_DATA_WAIT_ATTEMPTS = 30;       // 30 * F100_MSEC = 3 seconds
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // fristream
@@ -20,10 +23,13 @@ typedef struct
     volatile uint32_t   ref_counter;    // References counter
     volatile bool       is_open;        // open/closed flag
     uint32_t            id;             // stream id
-    uint64_t            read_size;      // read size
+    volatile uint64_t   read_size;      // read size
+    volatile uint64_t   written_size;   // written size
     fuuid_t             src;            // source address
     fuuid_t             dst;            // destination address
     fmsgbus_t          *msgbus;         // Messages bus
+    pthread_mutex_t     mutex;          // Mutex for streams guard
+    sem_t               pin_sem;        // Semaphore for input stream data wait
     fistream_t         *pin;            // input stream
     fostream_t         *pout;           // output stream
 } fristream_t;
@@ -31,17 +37,45 @@ typedef struct
 static fristream_t *fristream_retain (fristream_t *pstream);
 static bool         fristream_release(fristream_t *pstream);
 static size_t       fristream_read   (fristream_t *pstream, char *data, size_t size);
+static void         fristream_close  (fristream_t *pstream);
 
 static void fristream_data(fristream_t *pstream, FMSG_TYPE(stream_data) const *msg)
 {
     if (msg->id == pstream->id
         && memcmp(&msg->hdr.src, &pstream->src, sizeof pstream->src) == 0)
     {
-        char src_str[2 * sizeof(fuuid_t) + 1] = { 0 };
-        char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
-        FS_INFO("Received: %s<-%s [%u B]", fuuid2str(&pstream->dst, dst_str, sizeof dst_str), fuuid2str(&pstream->src, src_str, sizeof src_str), msg->size);
+        int i = 0;
+        for(; pstream->is_open && msg->offset != pstream->written_size && i < FSTREAM_DATA_WAIT_ATTEMPTS; ++i)
+            nanosleep(&F100_MSEC, NULL);
 
-        // TODO
+        if (!pstream->is_open)
+            return;
+
+        if (i >= FSTREAM_DATA_WAIT_ATTEMPTS)
+        {
+            fristream_close(pstream);
+            FS_ERR("Istream was closed. Data block wait timeout expired.");
+        }
+        else
+        {
+            size_t size = 0;
+
+            fpush_lock(pstream->mutex);
+            size = pstream->pout->write(pstream->pout, (char const *)msg->data, msg->size);
+            fpop_lock();
+
+            char src_str[2 * sizeof(fuuid_t) + 1] = { 0 };
+            char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
+            FS_INFO("Received: %s<-%s offset=%llu, size=%u [%u B]",
+                    fuuid2str(&pstream->dst, dst_str, sizeof dst_str),
+                    fuuid2str(&pstream->src, src_str, sizeof src_str),
+                    pstream->written_size,
+                    msg->size,
+                    size);
+
+            pstream->written_size += size;
+            sem_post(&pstream->pin_sem);
+        }
     }
 }
 
@@ -55,6 +89,7 @@ static void fristream_msgbus_release(fristream_t *pstream)
 {
     fmsgbus_unsubscribe(pstream->msgbus, FSTREAM_DATA, (fmsg_handler_t)fristream_data);
     fmsgbus_release(pstream->msgbus);
+    pstream->msgbus = 0;
 }
 
 static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src, fuuid_t const *dst)
@@ -76,7 +111,17 @@ static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src
     pstream->id = id;
     pstream->src = *src;
     pstream->dst = *dst;
+
+    if (sem_init(&pstream->pin_sem, 0, 0) == -1)
+    {
+        FS_ERR("The semaphore initialization is failed");
+        fristream_release(pstream);
+        return 0;
+    }
+
     fristream_msgbus_retain(pstream, msgbus);
+
+    pstream->mutex = PTHREAD_MUTEX_INITIALIZER;
 
     fmem_iostream_t *memstream = fmem_iostream(FMEM_BLOCK_SIZE);
     if (!memstream)
@@ -126,8 +171,8 @@ static bool fristream_release(fristream_t *pstream)
             FS_ERR("Invalid istream");
         else if (!--pstream->ref_counter)
         {
-            if (pstream->msgbus)
-                fristream_msgbus_release(pstream);
+            fristream_close(pstream);
+            sem_destroy(&pstream->pin_sem);
             if (pstream->pin)
                 pstream->pin->release(pstream->pin);
             if (pstream->pout)
@@ -145,7 +190,9 @@ static bool fristream_release(fristream_t *pstream)
 static void fristream_close(fristream_t *pstream)
 {
     pstream->is_open = false;
-    // TODO
+    sem_post(&pstream->pin_sem);
+    if (pstream->msgbus)
+        fristream_msgbus_release(pstream);
 }
 
 static size_t fristream_read(fristream_t *pstream, char *data, size_t size)
@@ -165,9 +212,22 @@ static size_t fristream_read(fristream_t *pstream, char *data, size_t size)
     if (!data || !size)
         return 0;
 
-    // TODO
+    size_t read_size = 0;
+    while (read_size < size)
+    {
+        while (sem_wait(&pstream->pin_sem) == -1 && errno == EINTR)
+            continue;       // Restart if interrupted by handler
 
-    return 0;
+        fpush_lock(pstream->mutex);
+        read_size += pstream->pin->read(pstream->pin, data + read_size, size - read_size);
+        fpop_lock();
+    }
+
+    pstream->read_size += read_size;
+
+    sem_post(&pstream->pin_sem);
+
+    return read_size;
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -179,7 +239,7 @@ typedef struct
     volatile uint32_t   ref_counter;    // References counter
     volatile bool       is_open;        // open/closed flag
     uint32_t            id;             // stream id
-    uint64_t            written_size;   // written size
+    volatile uint64_t   written_size;   // written size
     fuuid_t             src;            // source address
     fuuid_t             dst;            // destination address
     fmsgbus_t          *msgbus;         // Messages bus
@@ -280,12 +340,14 @@ static size_t frostream_write(frostream_t *pstream, char const *data, size_t con
 
         char src_str[2 * sizeof(fuuid_t) + 1] = { 0 };
         char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
-        FS_INFO("Write: %s->%s [%u B]", fuuid2str(&pstream->src, src_str, sizeof src_str), fuuid2str(&pstream->dst, dst_str, sizeof dst_str), block_size);
+        FS_INFO("Write: %s->%s offset=%llu, size=%u",
+                fuuid2str(&pstream->src, src_str, sizeof src_str),
+                fuuid2str(&pstream->dst, dst_str, sizeof dst_str),
+                pstream->written_size,
+                block_size);
 
         switch(fmsgbus_publish(pstream->msgbus, FSTREAM_DATA, (fmsg_t const *)&req))
         {
-            case FERR_NO_MEM:
-                return written_size;
             case FSUCCESS:
                 break;
             default:
@@ -400,14 +462,6 @@ struct frstream_factory
     uint8_t                     buf[1024 * 1024];
     fring_queue_t              *messages;
 };
-
-#define frstream_factory_push_lock(mutex)           \
-    if (pthread_mutex_lock(&mutex))	            \
-        FS_ERR("The mutex locking is failed");      \
-    else                                            \
-        pthread_cleanup_push((void (*)())pthread_mutex_unlock, (void *)&mutex);
-
-#define frstream_factory_pop_lock() pthread_cleanup_pop(1)
 
 static ferr_t frstream_factory_subscribe_istream_listener_impl(frstream_factory_t *pfactory, fristream_listener_t listener, void *param)
 {
@@ -653,9 +707,9 @@ static void frstream_factory_stream_request(frstream_factory_t *pfactory, FMSG_T
 
         ferr_t ret;
 
-        frstream_factory_push_lock(pfactory->messages_mutex);
+        fpush_lock(pfactory->messages_mutex);
         ret = fring_queue_push_back(pfactory->messages, &stream_request_msg, sizeof stream_request_msg);
-        frstream_factory_pop_lock();
+        fpop_lock();
 
         if (ret == FSUCCESS)
             sem_post(&pfactory->messages_sem);
@@ -680,9 +734,9 @@ static void frstream_factory_stream(frstream_factory_t *pfactory, FMSG_TYPE(stre
 
         ferr_t ret;
 
-        frstream_factory_push_lock(pfactory->messages_mutex);
+        fpush_lock(pfactory->messages_mutex);
         ret = fring_queue_push_back(pfactory->messages, &stream_msg, sizeof stream_msg);
-        frstream_factory_pop_lock();
+        fpop_lock();
 
         if (ret == FSUCCESS)
             sem_post(&pfactory->messages_sem);
@@ -726,9 +780,7 @@ frstream_factory_t *frstream_factory(fmsgbus_t *pmsgbus, fuuid_t const *uuid)
 
     pfactory->ref_counter = 1;
     pfactory->uuid = *uuid;
-
-    static pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
-    pfactory->messages_mutex = mutex_initializer;
+    pfactory->messages_mutex = PTHREAD_MUTEX_INITIALIZER;
 
     if (sem_init(&pfactory->messages_sem, 0, 0) == -1)
     {
@@ -841,9 +893,9 @@ ferr_t frstream_factory_istream_subscribe(frstream_factory_t *pfactory, fristrea
         &result
     };
 
-    frstream_factory_push_lock(pfactory->messages_mutex);
+    fpush_lock(pfactory->messages_mutex);
     ret = fring_queue_push_back(pfactory->messages, &msg, sizeof msg);
-    frstream_factory_pop_lock();
+    fpop_lock();
 
     if (ret == FSUCCESS)
     {
@@ -889,9 +941,9 @@ ferr_t frstream_factory_ostream_subscribe(frstream_factory_t *pfactory, frostrea
         &result
     };
 
-    frstream_factory_push_lock(pfactory->messages_mutex);
+    fpush_lock(pfactory->messages_mutex);
     ret = fring_queue_push_back(pfactory->messages, &msg, sizeof msg);
-    frstream_factory_pop_lock();
+    fpop_lock();
 
     if (ret == FSUCCESS)
     {
@@ -936,9 +988,9 @@ ferr_t frstream_factory_istream_unsubscribe(frstream_factory_t *pfactory, fristr
         &result
     };
 
-    frstream_factory_push_lock(pfactory->messages_mutex);
+    fpush_lock(pfactory->messages_mutex);
     ret = fring_queue_push_back(pfactory->messages, &msg, sizeof msg);
-    frstream_factory_pop_lock();
+    fpop_lock();
 
     if (ret == FSUCCESS)
     {
@@ -983,9 +1035,9 @@ ferr_t frstream_factory_ostream_unsubscribe(frstream_factory_t *pfactory, frostr
         &result
     };
 
-    frstream_factory_push_lock(pfactory->messages_mutex);
+    fpush_lock(pfactory->messages_mutex);
     ret = fring_queue_push_back(pfactory->messages, &msg, sizeof msg);
-    frstream_factory_pop_lock();
+    fpop_lock();
 
     if (ret == FSUCCESS)
     {

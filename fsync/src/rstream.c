@@ -386,6 +386,7 @@ typedef struct
 {
     uint32_t                type;
     fuuid_t                 source;
+    uint32_t                cookie;
 } frstream_msg_stream_request_t;
 
 typedef struct
@@ -393,6 +394,7 @@ typedef struct
     uint32_t                type;
     fuuid_t                 dst;
     uint32_t                id;
+    uint32_t                cookie;
 } frstream_msg_stream_t;
 
 typedef struct
@@ -555,7 +557,7 @@ static ferr_t frstream_factory_unsubscribe_ostream_listener_impl(frstream_factor
     return FSUCCESS;
 }
 
-static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory, fuuid_t const *source)
+static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory, fuuid_t const *source, uint32_t cookie)
 {
     for(int i = 0; i < FSTREAM_MAX_HANDLERS; ++i)
     {
@@ -564,12 +566,13 @@ static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory,
             uint32_t const id = ++pfactory->id;
             fristream_t *pistream = fristream(pfactory->msgbus, id, source, &pfactory->uuid);
             if (!pistream) break;
-            pfactory->ilisteners[i].listener(pfactory->ilisteners[i].param, (fistream_t*)pistream);
+            pfactory->ilisteners[i].listener(pfactory->ilisteners[i].param, (fistream_t*)pistream, cookie);
             fristream_release(pistream);
 
             // Send stream ID to source
             FMSG(stream, req, pfactory->uuid, *source,
-                id
+                id,
+                cookie
             );
 
             ferr_t rc = fmsgbus_publish(pfactory->msgbus, FSTREAM, (fmsg_t const *)&req);
@@ -588,7 +591,7 @@ static ferr_t frstream_factory_stream_request_impl(frstream_factory_t *pfactory,
     return FFAIL;
 }
 
-static ferr_t frstream_factory_stream_response_impl(frstream_factory_t *pfactory, fuuid_t const *dst, uint32_t id)
+static ferr_t frstream_factory_stream_response_impl(frstream_factory_t *pfactory, fuuid_t const *dst, uint32_t id, uint32_t cookie)
 {
     for(int i = 0; i < FSTREAM_MAX_HANDLERS; ++i)
     {
@@ -596,7 +599,7 @@ static ferr_t frstream_factory_stream_response_impl(frstream_factory_t *pfactory
         {
             frostream_t *postream = frostream(pfactory->msgbus, id, &pfactory->uuid, dst);
             if (!postream) break;
-            pfactory->olisteners[i].listener(pfactory->olisteners[i].param, (fostream_t*)postream);
+            pfactory->olisteners[i].listener(pfactory->olisteners[i].param, (fostream_t*)postream, cookie);
             frostream_release(postream);
             return FSUCCESS;
         }
@@ -632,7 +635,7 @@ static void *frstream_factory_ctrl_thread(void *param)
                 case FSTREAM_MSG_REQUEST:
                 {
                     frstream_msg_stream_request_t *msg = (frstream_msg_stream_request_t *)data;
-                    if (frstream_factory_stream_request_impl(pfactory, &msg->source) != FSUCCESS)
+                    if (frstream_factory_stream_request_impl(pfactory, &msg->source, msg->cookie) != FSUCCESS)
                     {
                         nanosleep(&F1_MSEC, NULL);
                         sem_post(&pfactory->messages_sem);
@@ -644,7 +647,7 @@ static void *frstream_factory_ctrl_thread(void *param)
                 case FSTREAM_MSG:
                 {
                     frstream_msg_stream_t *msg = (frstream_msg_stream_t *)data;
-                    if (frstream_factory_stream_response_impl(pfactory, &msg->dst, msg->id) != FSUCCESS)
+                    if (frstream_factory_stream_response_impl(pfactory, &msg->dst, msg->id, msg->cookie) != FSUCCESS)
                     {
                         nanosleep(&F1_MSEC, NULL);
                         sem_post(&pfactory->messages_sem);
@@ -695,14 +698,15 @@ static void *frstream_factory_ctrl_thread(void *param)
     return 0;
 }
 
-static void frstream_factory_stream_request(frstream_factory_t *pfactory, FMSG_TYPE(stream_request) const *msg)
+static void frstream_factory_stream_req(frstream_factory_t *pfactory, FMSG_TYPE(stream_request) const *msg)
 {
     if (memcmp(&msg->hdr.dst, &pfactory->uuid, sizeof pfactory->uuid) == 0)
     {
         frstream_msg_stream_request_t stream_request_msg =
         {
             FSTREAM_MSG_REQUEST,
-            msg->hdr.src
+            msg->hdr.src,
+            msg->cookie
         };
 
         ferr_t ret;
@@ -729,7 +733,8 @@ static void frstream_factory_stream(frstream_factory_t *pfactory, FMSG_TYPE(stre
         {
             FSTREAM_MSG,
             msg->hdr.src,
-            msg->id
+            msg->id,
+            msg->cookie
         };
 
         ferr_t ret;
@@ -751,13 +756,13 @@ static void frstream_factory_stream(frstream_factory_t *pfactory, FMSG_TYPE(stre
 static void frstream_factory_msgbus_retain(frstream_factory_t *pfactory, fmsgbus_t *pmsgbus)
 {
     pfactory->msgbus = fmsgbus_retain(pmsgbus);
-    fmsgbus_subscribe(pmsgbus, FSTREAM_REQUEST, (fmsg_handler_t)frstream_factory_stream_request, pfactory);
+    fmsgbus_subscribe(pmsgbus, FSTREAM_REQUEST, (fmsg_handler_t)frstream_factory_stream_req, pfactory);
     fmsgbus_subscribe(pmsgbus, FSTREAM,         (fmsg_handler_t)frstream_factory_stream,         pfactory);
 }
 
 static void frstream_factory_msgbus_release(frstream_factory_t *pfactory)
 {
-    fmsgbus_unsubscribe(pfactory->msgbus, FSTREAM_REQUEST, (fmsg_handler_t)frstream_factory_stream_request);
+    fmsgbus_unsubscribe(pfactory->msgbus, FSTREAM_REQUEST, (fmsg_handler_t)frstream_factory_stream_req);
     fmsgbus_unsubscribe(pfactory->msgbus, FSTREAM,         (fmsg_handler_t)frstream_factory_stream);
     fmsgbus_release(pfactory->msgbus);
 }
@@ -845,7 +850,7 @@ void frstream_factory_release(frstream_factory_t *pfactory)
 }
 
 // src(ostream) ----> dst(istream)
-ferr_t frstream_factory_ostream(frstream_factory_t *pfactory, fuuid_t const *dst)
+ferr_t frstream_factory_stream_request(frstream_factory_t *pfactory, fuuid_t const *dst, uint32_t cookie)
 {
     if (!pfactory || !dst)
     {
@@ -853,11 +858,14 @@ ferr_t frstream_factory_ostream(frstream_factory_t *pfactory, fuuid_t const *dst
         return 0;
     }
 
-    FMSG(stream_request, req, pfactory->uuid, *dst,);
+    FMSG(stream_request, req, pfactory->uuid, *dst, cookie);
 
     char src_str[2 * sizeof(fuuid_t) + 1] = { 0 };
     char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
-    FS_INFO("Requesting stream. src=%s, dst=%s", fuuid2str(&pfactory->uuid, src_str, sizeof src_str), fuuid2str(dst, dst_str, sizeof dst_str));
+    FS_INFO("Requesting stream. src=%s, dst=%s, cookie=%u",
+            fuuid2str(&pfactory->uuid, src_str, sizeof src_str),
+            fuuid2str(dst, dst_str, sizeof dst_str),
+            cookie);
 
     ferr_t rc = fmsgbus_publish(pfactory->msgbus, FSTREAM_REQUEST, (fmsg_t const *)&req);
     if (rc != FSUCCESS)

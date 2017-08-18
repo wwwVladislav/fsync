@@ -1,19 +1,18 @@
-#include <stdio.h>
+#include "test.h"
 #include <conio.h>
 
-void fbd_test();
-void fsutils_test();
-void fsync_test();
-void futils_test();
+FUNIT(fbd);
+FUNIT(fsync);
+FUNIT(futils);
 
 int main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
-    fbd_test();
-    fsutils_test();
-    fsync_test();
-    futils_test();
+
+    FUNIT_TEST(futils);
+    FUNIT_TEST(fbd);
+    FUNIT_TEST(fsync);
 
     printf("Press any key...");
     getch();

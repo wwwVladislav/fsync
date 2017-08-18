@@ -1,11 +1,12 @@
+#include "test.h"
 #include <fdb/db.h>
 #include <fdb/sync/ids.h>
-#include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <assert.h>
 
-static void fbd_simple_test()
+FTEST_START(fbd_simple)
 {
     fdb_t *pdb = fdb_open("test", 4u, 1u, 16 * 1024 * 1024);
     if (pdb)
@@ -44,12 +45,14 @@ static void fbd_simple_test()
                         fdb_data_t key, value;
                         while (fdb_cursor_get(&cursor, &key, &value, FDB_NEXT))
                         {
-                            char k[16], v[16];
-                            memcpy(k, key.data, key.size);
-                            k[key.size] = 0;
-                            memcpy(v, value.data, value.size);
-                            v[value.size] = 0;
-                            printf("\'%s\' -> \'%s\'\n", k, v);
+                            int i = 0;
+                            for(; i < 3; ++i)
+                            {
+                                if (memcmp(data[i][0].data, key.data, key.size) == 0
+                                    && memcmp(data[i][1].data, value.data, value.size) == 0)
+                                    break;
+                            }
+                            assert(i < 3);
                         }
                         fdb_cursor_close(&cursor);
                     }
@@ -62,8 +65,9 @@ static void fbd_simple_test()
         fdb_release(pdb);
     }
 }
+FTEST_END()
 
-static void fbd_ids_test()
+FTEST_START(fbd_ids)
 {
     fdb_t *pdb = fdb_open("test", 4u, 1u, 16 * 1024 * 1024);
     if (pdb)
@@ -118,9 +122,9 @@ static void fbd_ids_test()
         fdb_release(pdb);
     }
 }
+FTEST_END()
 
-void fbd_test()
-{
-    fbd_simple_test();
-    fbd_ids_test();
-}
+FUNIT_TEST_START(fbd)
+    FTEST(fbd_simple);
+    FTEST(fbd_ids);
+FUNIT_TEST_END()

@@ -1,13 +1,17 @@
+#include "test.h"
 #include <futils/stream.h>
 #include <futils/msgbus.h>
+#include <futils/fs.h>
 #include <assert.h>
 #include <string.h>
+#include <io.h>
+#include <stdio.h>
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // streams test
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-void fstream_test()
+FTEST_START(fstream)
 {
     for(size_t block_size = 1; block_size < 5; ++block_size)
     {
@@ -48,8 +52,63 @@ void fstream_test()
         fmem_iostream_release(piostream);
     }
 }
+FTEST_END()
 
-void futils_test()
+FTEST_START(dir_iterator)
 {
-    fstream_test();
+    static char const *dirs[] =
+    {
+        "1",
+        "1/1",
+        "1/2",
+        "1/2/1",
+        "1/2/2",
+        "1/2/2/1",
+        "1/2/2/2",
+        "1/2/2/3",
+        "1/2/3",
+        "1/3"
+    };
+
+    for(int i = 0; i < sizeof dirs / sizeof *dirs; ++i)
+        mkdir(dirs[i]);
+
+    fsiterator_t *it = fsdir_iterator("1");
+    if (it)
+    {
+        for(dirent_t entry; fsdir_iterator_next(it, &entry);)
+        {
+            if (entry.type == FS_DIR)
+            {
+                char path[FMAX_PATH] = { 0 };
+                fsdir_iterator_directory(it, path, sizeof path);
+                if (strncmp(path, "2/2/3", strlen("2/2/3")) == 0)
+                    break;
+            }
+        }
+
+        fsdir_iterator_seek(it, "2/2/1");
+
+        char path[FMAX_PATH] = { 0 };
+        size_t path_len = fsdir_iterator_directory(it, path, sizeof path);
+        assert(strncmp(path, "2/2/1", path_len) == 0);
+
+        int i = 6;
+        for(dirent_t entry; fsdir_iterator_next(it, &entry); ++i)
+        {
+            if (entry.type == FS_DIR)
+            {
+                strcpy(path, "1/");
+                path_len = fsdir_iterator_directory(it, path + 2, sizeof path);
+                assert(strcmp(path, dirs[i]) == 0);
+            }
+        }
+        fsdir_iterator_free(it);
+    }
 }
+FTEST_END()
+
+FUNIT_TEST_START(futils)
+    FTEST(fstream);
+    FTEST(dir_iterator);
+FUNIT_TEST_END()

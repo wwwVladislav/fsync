@@ -54,10 +54,12 @@ FMSG_DEF(file_part,
 )
 
 FMSG_DEF(stream_request,
+    uint32_t                cookie;                 // cookie (can contain some useful ID, for example, source component ID)
 )
 
 FMSG_DEF(stream,
     uint32_t                id;                     // stream id
+    uint32_t                cookie;                 // cookie (can contain some useful ID, for example, source component ID)
 )
 
 FMSG_DEF(stream_data,

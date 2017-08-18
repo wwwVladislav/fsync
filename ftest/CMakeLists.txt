@@ -2,12 +2,12 @@ cmake_minimum_required(VERSION 3.1)
 project(ftest)
 
 set(FTEST_HEADERS
+    src/test.h
 )
 
 set(FTEST_SOURCES
     src/main.c
     src/fdb.c
-    src/fs.c
     src/fsync.c
     src/futils.c
 )

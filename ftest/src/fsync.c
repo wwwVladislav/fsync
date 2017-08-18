@@ -1,9 +1,10 @@
+#include "test.h"
 #include "../../fsync/src/rsync.h"
 #include "../../fsync/src/rstream.h"
+#include "../../fsync/src/sync_engine.h"
 #include <futils/stream.h>
 #include <futils/msgbus.h>
 #include <string.h>
-#include <stdio.h>
 #include <assert.h>
 
 #include <time.h>
@@ -115,8 +116,10 @@ static char const FDATA[] =
     "She ate a little bit, and said anxiously to herself, 'Which way? Which way?', holding her hand on the top of her head to feel which way it was growing, and she was quite surprised to find that she remained the same size: to be sure, this generally happens when one eats cake, but Alice had got so much into the way of expecting nothing but out-of-the-way things to happen, that it seemed quite dull and stupid for life to go on in the common way.\n"
     "So she set to work, and very soon finished off the cake.\n";
 
-static void frsync_test()
+FTEST_START(frsync_algorithm)
 {
+    ferr_t rc;
+
     fdata_istream_t base_data_stream =
     {
         {
@@ -173,8 +176,9 @@ static void frsync_test()
     frsync_signature_calculator_t *psig_calc = frsync_signature_calculator_create();
     if (psig_calc)
     {
-        if (frsync_signature_calculate(psig_calc, (fistream_t*)&base_data_stream, (fostream_t*)&signature_ostream) != FSUCCESS)
-            printf("Signature calculation failed\n");
+        rc = frsync_signature_calculate(psig_calc,
+                                        (fistream_t*)&base_data_stream,
+                                        (fostream_t*)&signature_ostream);               assert(rc == FSUCCESS);
         frsync_signature_calculator_release(psig_calc);
     }
 
@@ -205,16 +209,20 @@ static void frsync_test()
     };
     memcpy(signature_istream.data, signature_ostream.data, signature_ostream.size);
 
-    frsync_signature_t *psig = frsync_signature_create();
+    frsync_signature_t *psig = frsync_signature_create();                               assert(psig);
     if (psig)
     {
-        if (frsync_signature_load(psig, (fistream_t*)&signature_istream) == FSUCCESS)
+        rc = frsync_signature_load(psig, (fistream_t*)&signature_istream);              assert(rc == FSUCCESS);
+        if (rc == FSUCCESS)
         {
             // Delta calculation
             frsync_delta_calculator_t *pdelta_calc = frsync_delta_calculator_create(psig);
             if (pdelta_calc)
             {
-                if (frsync_delta_calculate(pdelta_calc, (fistream_t*)&data_stream, (fostream_t*)&delta_ostream) == FSUCCESS)
+                rc = frsync_delta_calculate(pdelta_calc,
+                                            (fistream_t*)&data_stream,
+                                            (fostream_t*)&delta_ostream);               assert(rc == FSUCCESS);
+                if (rc == FSUCCESS)
                 {
                     fdata_istream_t delta_istream =
                     {
@@ -233,44 +241,48 @@ static void frsync_test()
                     // Delta apply
                     base_data_stream.stream.seek(&base_data_stream.stream, 0);
                     frsync_delta_t *pdelta = frsync_delta_create((fistream_t*)&base_data_stream);
-                    if (pdelta)
+                    if (pdelta)                                                         assert(pdelta);
                     {
-                        if (frsync_delta_apply(pdelta, (fistream_t *)&delta_istream, (fostream_t *)&new_data_ostream) != FSUCCESS)
-                            printf("Delta wasn't applied\n");
+                        rc = frsync_delta_apply(pdelta,
+                                                (fistream_t *)&delta_istream,
+                                                (fostream_t *)&new_data_ostream);       assert(rc == FSUCCESS);
                         frsync_delta_release(pdelta);
                     }
                 }
-                else printf("Delta calculation failed\n");
                 frsync_delta_calculator_release(pdelta_calc);
             }
         }
-        else printf("Signature load failed\n");
         frsync_signature_release(psig);
     }
 
-    if (new_data_ostream.size != data_stream.size
-        || memcmp(new_data_ostream.data, data_stream.data, data_stream.size) != 0)
-        printf("Delta wasn't applied\n");
+    assert(new_data_ostream.size == data_stream.size);
+    assert(memcmp(new_data_ostream.data, data_stream.data, data_stream.size) == 0);
 }
+FTEST_END()
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // rstream test
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 static fistream_t *pistream = 0;
-static fostream_t *postream = 0;
+static uint32_t istream_cookie = 0;
 
-static void fristream_listener(void *ptr, fistream_t *pstream)
+static fostream_t *postream = 0;
+static uint32_t ostream_cookie = 0;
+
+static void fristream_listener(void *ptr, fistream_t *pstream, uint32_t cookie)
 {
     pistream = pstream->retain(pstream);
+    istream_cookie = cookie;
 }
 
-static void frostream_listener(void *ptr, fostream_t *pstream)
+static void frostream_listener(void *ptr, fostream_t *pstream, uint32_t cookie)
 {
     postream = pstream->retain(pstream);
+    ostream_cookie = cookie;
 }
 
-void frstream_test()
+FTEST_START(frstream)
 {
     ferr_t rc;
     fmsgbus_t *msgbus = 0;
@@ -285,13 +297,16 @@ void frstream_test()
     {
         rc = frstream_factory_istream_subscribe(rstream_factory, fristream_listener, 0);    assert(rc == FSUCCESS);
         rc = frstream_factory_ostream_subscribe(rstream_factory, frostream_listener, 0);    assert(rc == FSUCCESS);
-        rc = frstream_factory_ostream(rstream_factory, &uuid);                              assert(rc == FSUCCESS);
+        rc = frstream_factory_stream_request(rstream_factory, &uuid, 42);                   assert(rc == FSUCCESS);
 
         while (!postream || !pistream)
         {
             static struct timespec const F1_SEC = { 1, 0 };
             nanosleep(&F1_SEC, NULL);
         }
+
+        assert(istream_cookie == 42);
+        assert(ostream_cookie == 42);
 
         size_t written = postream->write(postream, FDATA, sizeof FDATA);                    assert(written == sizeof FDATA);
 
@@ -305,12 +320,34 @@ void frstream_test()
         if (postream) postream->release(postream);
         frstream_factory_release(rstream_factory);
     }
+
     fmsgbus_release(msgbus);
-
 }
+FTEST_END()
 
-void fsync_test()
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// sync_engine test
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+FTEST_START(fsync_engine)
 {
-    frsync_test();
-    frstream_test();
+    fmsgbus_t *msgbus = 0;
+    static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    assert(fmsgbus_create(&msgbus) == FSUCCESS);
+
+    fsync_engine_t *psync_engine = fsync_engine(msgbus, &uuid);                             assert(psync_engine);
+    if (psync_engine)
+    {
+        // TODO
+        fsync_engine_release(psync_engine);
+    }
+
+    fmsgbus_release(msgbus);
 }
+FTEST_END()
+
+FUNIT_TEST_START(fsync)
+    FTEST(frsync_algorithm);
+    FTEST(frstream);
+    FTEST(fsync_engine);
+FUNIT_TEST_END()

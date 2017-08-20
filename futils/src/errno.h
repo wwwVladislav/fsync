@@ -13,7 +13,8 @@ typedef enum ferr
     FERR_NO_MEM      = -3,
     FERR_NOT_IMPL    = -4,
     FERR_TIMEOUT     = -5,
-    FERR_UNKNOWN     = -6
+    FERR_OVERFLOW    = -6,
+    FERR_UNKNOWN     = -7
 } ferr_t;
 
 #endif

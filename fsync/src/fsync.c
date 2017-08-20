@@ -8,6 +8,7 @@
 #include <futils/fs.h>
 #include <futils/log.h>
 #include <futils/queue.h>
+#include <futils/utils.h>
 #define RSYNC_NO_STDIO_INTERFACE
 #include <librsync.h>
 #include <stdlib.h>
@@ -103,7 +104,7 @@ static void fsync_status_handler(fsync_t *psync, FMSG_TYPE(node_status) const *m
                         file_info->is_exist = (info.status & FFILE_IS_EXIST) != 0;
                         memcpy(file_info->path, info.path, sizeof info.path);
 
-                        if (files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
+                        if (files_list.files_num >= FARRAY_SIZE(files_list.files))
                         {
                             if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, (fmsg_t const *)&files_list) != FSUCCESS)
                                 FS_ERR("Files list not published");
@@ -174,7 +175,7 @@ static void fsync_notify_files_diff(fsync_t *psync, fuuid_t const *uuid)
                         file_info->is_exist = (info.status & FFILE_IS_EXIST) != 0;
                         memcpy(file_info->path, info.path, sizeof info.path);
 
-                        if (files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
+                        if (files_list.files_num >= FARRAY_SIZE(files_list.files))
                         {
                             if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, (fmsg_t const *)&files_list) != FSUCCESS)
                                 FS_ERR("Files list not published");
@@ -281,7 +282,7 @@ static void fsync_sync_files_list_handler(fsync_t *psync, FMSG_TYPE(sync_files_l
                         file_info->is_exist = (info.status & FFILE_IS_EXIST) != 0;
                         memcpy(file_info->path, info.path, sizeof info.path);
 
-                        if (files_list.files_num >= sizeof files_list.files / sizeof *files_list.files)
+                        if (files_list.files_num >= FARRAY_SIZE(files_list.files))
                         {
                             if (fmsgbus_publish(psync->msgbus, FSYNC_FILES_LIST, (fmsg_t const *)&files_list) != FSUCCESS)
                                 FS_ERR("Files list not published");

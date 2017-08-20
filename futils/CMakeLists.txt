@@ -13,6 +13,8 @@ set(FUTILS_HEADERS
     src/msgbus.h
     src/fs.h
     src/stream.h
+    src/mutex.h
+    src/utils.h
 )
 
 set(FUTILS_SOURCES

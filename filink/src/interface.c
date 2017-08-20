@@ -3,6 +3,7 @@
 #include <fnet/transport.h>
 #include <futils/log.h>
 #include <futils/mutex.h>
+#include <futils/utils.h>
 #include <fcommon/messages.h>
 #include <fdb/sync/nodes.h>
 #include <stdlib.h>
@@ -464,7 +465,7 @@ void filink_unbind(filink_t *ilink)
 
 static void filink_disconnect_all(filink_t *ilink)
 {
-    for(int i = 0; i < sizeof ilink->nodes / sizeof *ilink->nodes; ++i)
+    for(int i = 0; i < FARRAY_SIZE(ilink->nodes); ++i)
     {
         if (ilink->nodes[i].transport)
             fnet_disconnect(ilink->nodes[i].transport);
@@ -540,7 +541,7 @@ bool filink_is_connected(filink_t *ilink, fuuid_t const *uuid)
     if (!ilink || !uuid)
         return false;
 
-    for(int i = 0; i < sizeof ilink->nodes / sizeof *ilink->nodes; ++i)
+    for(int i = 0; i < FARRAY_SIZE(ilink->nodes); ++i)
     {
         if (ilink->nodes[i].transport &&
             memcmp(&ilink->nodes[i].uuid, uuid, sizeof(*uuid)) == 0)

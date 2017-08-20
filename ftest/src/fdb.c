@@ -1,6 +1,7 @@
 #include "test.h"
 #include <fdb/db.h>
 #include <fdb/sync/ids.h>
+#include <futils/utils.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -23,7 +24,7 @@ FTEST_START(fbd_simple)
                     { { 7, "3 Hello" },   { 5, "World" } },
                     { { 9, "1 Hello!!" }, { 7, "World!!" } }
                 };
-                for(int i = 0; i < sizeof data / sizeof data[0]; ++i)
+                for(int i = 0; i < FARRAY_SIZE(data); ++i)
                     fdb_map_put(&map, &transaction, data[i], data[i] + 1);
                 fdb_transaction_commit(&transaction);
 

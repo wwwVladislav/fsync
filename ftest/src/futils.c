@@ -2,6 +2,7 @@
 #include <futils/stream.h>
 #include <futils/msgbus.h>
 #include <futils/fs.h>
+#include <futils/utils.h>
 #include <assert.h>
 #include <string.h>
 #include <io.h>
@@ -70,7 +71,7 @@ FTEST_START(dir_iterator)
         "1/3"
     };
 
-    for(int i = 0; i < sizeof dirs / sizeof *dirs; ++i)
+    for(int i = 0; i < FARRAY_SIZE(dirs); ++i)
         mkdir(dirs[i]);
 
     fsiterator_t *it = fsdir_iterator("1");

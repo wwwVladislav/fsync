@@ -1,5 +1,6 @@
 #include "protocol.h"
 #include <futils/log.h>
+#include <futils/utils.h>
 #include <fnet/marshaller.h>
 #include <string.h>
 #include <stddef.h>
@@ -359,7 +360,7 @@ static uint8_t *fproto_unmarshal_struct(fnet_client_t *client, fproto_field_desc
 // TODO: marshal/unmarshal messages into the stream for performance purposes.
 bool fproto_send(fnet_client_t *client, fproto_msg_t msg, uint8_t const *data)
 {
-    if (msg < 0 || msg > sizeof fproto_messages / sizeof *fproto_messages)
+    if (msg < 0 || msg > FARRAY_SIZE(fproto_messages))
     {
         FS_ERR("Unknown message type");
         return false;
@@ -388,7 +389,7 @@ bool fproto_send(fnet_client_t *client, fproto_msg_t msg, uint8_t const *data)
 
 static bool fproto_recv(fnet_client_t *client, fproto_msg_t msg, uint8_t *data)
 {
-    if (msg < 0 || msg > sizeof fproto_messages / sizeof *fproto_messages)
+    if (msg < 0 || msg > FARRAY_SIZE(fproto_messages))
     {
         FS_ERR("Unknown message type");
         return false;

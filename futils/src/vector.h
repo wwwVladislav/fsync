@@ -6,6 +6,8 @@
 
 typedef struct fvector fvector_t;
 
+typedef int (*fvector_comparer_t)(const void *, const void*);
+
 fvector_t *fvector(uint32_t item_size, size_t size, size_t capacity);
 fvector_t * fvector_retain(fvector_t *);
 void fvector_release(fvector_t *);

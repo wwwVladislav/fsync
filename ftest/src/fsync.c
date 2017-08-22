@@ -331,6 +331,15 @@ FTEST_END()
 
 FTEST_START(fsync_engine)
 {
+    ferr_t rc;
+
+    fmem_iostream_t *src_stream = fmem_iostream(256);                                       assert(src_stream);
+    fostream_t      *src_ostream = fmem_ostream(src_stream);                                assert(src_ostream);
+    size_t wsize = src_ostream->write(src_ostream, FDATA, sizeof FDATA);                    assert(wsize == sizeof FDATA);
+    src_ostream->release(src_ostream);
+
+    fistream_t      *src_istream = fmem_istream(src_stream);                                assert(src_istream);
+
     fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     assert(fmsgbus_create(&msgbus) == FSUCCESS);
@@ -338,11 +347,15 @@ FTEST_START(fsync_engine)
     fsync_engine_t *psync_engine = fsync_engine(msgbus, &uuid);                             assert(psync_engine);
     if (psync_engine)
     {
+        fsync_metainf_t metainf = { 0 };
+        rc = fsync_engine_sync(psync_engine, &uuid, 0, metainf, src_istream);               assert(rc == FSUCCESS);
         // TODO
         fsync_engine_release(psync_engine);
     }
 
     fmsgbus_release(msgbus);
+    fmem_iostream_release(src_stream);
+    src_istream->release(src_istream);
 }
 FTEST_END()
 

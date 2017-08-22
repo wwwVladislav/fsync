@@ -7,13 +7,14 @@
 
 typedef enum
 {
-    FNODE_STATUS = 1,
-    FSYNC_FILES_LIST,
-    FFILE_PART_REQUEST,
-    FFILE_PART,
-    FSTREAM_REQUEST,
-    FSTREAM,
-    FSTREAM_DATA
+    FNODE_STATUS = 1,       // node_status
+    FSYNC_FILES_LIST,       // sync_files_list
+    FFILE_PART_REQUEST,     // file_part_request
+    FFILE_PART,             // file_part
+    FSTREAM_REQUEST,        // stream_request
+    FSTREAM,                // stream
+    FSTREAM_DATA,           // stream_data
+    FSYNC_REQUEST           // sync_request
 } fmessage_t;
 
 enum
@@ -54,19 +55,25 @@ FMSG_DEF(file_part,
 )
 
 FMSG_DEF(stream_request,
-    uint32_t                cookie;                 // cookie (can contain some useful ID, for example, source component ID)
+    uint32_t                cookie;                     // cookie (can contain some useful ID, for example, source component ID)
 )
 
 FMSG_DEF(stream,
-    uint32_t                id;                     // stream id
-    uint32_t                cookie;                 // cookie (can contain some useful ID, for example, source component ID)
+    uint32_t                id;                         // stream id
+    uint32_t                cookie;                     // cookie (can contain some useful ID, for example, source component ID)
 )
 
 FMSG_DEF(stream_data,
-    uint32_t                id;                     // stream id
-    uint64_t                offset;                 // offset
-    uint16_t                size;                   // data size
-    uint8_t                 data[FSYNC_BLOCK_SIZE]; // data
+    uint32_t                id;                         // stream id
+    uint64_t                offset;                     // offset
+    uint16_t                size;                       // data size
+    uint8_t                 data[FSYNC_BLOCK_SIZE];     // data
+)
+
+FMSG_DEF(sync_request,
+    uint32_t                listener_id;                // synchronization listener id
+    uint32_t                metainf_size;               // meta information size
+    uint8_t                 metainf[FMAX_METAINF_SIZE]; // meta information
 )
 
 #endif

@@ -9,8 +9,6 @@
 #include <stdio.h>
 #include <librsync.h>
 
-static struct timespec const F1_SEC = { 1, 0 };
-
 enum
 {
     FRBUF_SIZE = 8 * 1024

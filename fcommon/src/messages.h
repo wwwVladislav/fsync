@@ -14,7 +14,8 @@ typedef enum
     FSTREAM_REQUEST,        // stream_request
     FSTREAM,                // stream
     FSTREAM_DATA,           // stream_data
-    FSYNC_REQUEST           // sync_request
+    FSYNC_REQUEST,          // sync_request
+    FSYNC_FAILED            // sync_failed
 } fmessage_t;
 
 enum
@@ -72,8 +73,16 @@ FMSG_DEF(stream_data,
 
 FMSG_DEF(sync_request,
     uint32_t                listener_id;                // synchronization listener id
+    uint32_t                sync_id;                    // synchronization id
     uint32_t                metainf_size;               // meta information size
     uint8_t                 metainf[FMAX_METAINF_SIZE]; // meta information
+)
+
+FMSG_DEF(sync_failed,
+    uint32_t                listener_id;                // synchronization listener id
+    uint32_t                sync_id;                    // synchronization id
+    uint32_t                err;                        // error code
+    char                    msg[FMAX_ERROR_MSG_LEN];    // error message
 )
 
 #endif

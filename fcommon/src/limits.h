@@ -13,7 +13,8 @@ enum
     FSYNC_BLOCK_REQ_TIMEOUT     = 24*60*60, // Timeout for file part request (sec)
     FSYNC_MAX_REQ_PARTS_NUM     = 64,       // Maximum number of requested parts
     FMAX_ADDR                   = 1024,     // Max address length
-    FMAX_METAINF_SIZE           = 1024      // Maximum size of meta information
+    FMAX_METAINF_SIZE           = 1024,     // Maximum size of meta information
+    FMAX_ERROR_MSG_LEN          = 256       // Maximum length of error message
 };
 
 #endif

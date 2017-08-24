@@ -357,26 +357,23 @@ void fmsgbus_release(fmsgbus_t *pmsgbus)
     {
         if (!pmsgbus->ref_counter)
             FS_ERR("Invalid message bus");
-        else
+        else if (!--pmsgbus->ref_counter)
         {
-            if (!--pmsgbus->ref_counter)
+            pmsgbus->ctrl_thread.is_active = false;
+            sem_post(&pmsgbus->messages_sem);
+            pthread_join(pmsgbus->ctrl_thread.thread, 0);
+            sem_destroy(&pmsgbus->messages_sem);
+
+            for(uint32_t i = 0; i < FMSGBUS_MAX_THREADS; ++i)
             {
-                pmsgbus->ctrl_thread.is_active = false;
-                sem_post(&pmsgbus->messages_sem);
-                pthread_join(pmsgbus->ctrl_thread.thread, 0);
-                sem_destroy(&pmsgbus->messages_sem);
-
-                for(uint32_t i = 0; i < FMSGBUS_MAX_THREADS; ++i)
-                {
-                    pmsgbus->threads[i].is_active = false;
-                    sem_post(&pmsgbus->threads[i].sem);
-                    pthread_join(pmsgbus->threads[i].thread, 0);
-                    sem_destroy(&pmsgbus->threads[i].sem);
-                }
-
-                fring_queue_free(pmsgbus->messages);
-                free(pmsgbus);
+                pmsgbus->threads[i].is_active = false;
+                sem_post(&pmsgbus->threads[i].sem);
+                pthread_join(pmsgbus->threads[i].thread, 0);
+                sem_destroy(&pmsgbus->threads[i].sem);
             }
+
+            fring_queue_free(pmsgbus->messages);
+            free(pmsgbus);
         }
     }
     else

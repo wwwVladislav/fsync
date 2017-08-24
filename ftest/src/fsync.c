@@ -348,7 +348,11 @@ FTEST_START(fsync_engine)
     if (psync_engine)
     {
         fsync_metainf_t metainf = { 0 };
-        rc = fsync_engine_sync(psync_engine, &uuid, 0, metainf, src_istream);               assert(rc == FSUCCESS);
+        rc = fsync_engine_sync(psync_engine, &uuid, 42, metainf, src_istream);               assert(rc == FSUCCESS);
+
+        static struct timespec const F10_SEC = { 10, 0 };
+        nanosleep(&F10_SEC, NULL);
+
         // TODO
         fsync_engine_release(psync_engine);
     }

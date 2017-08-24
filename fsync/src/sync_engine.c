@@ -8,6 +8,7 @@
 #include <fcommon/messages.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /*
          synchronization
@@ -22,26 +23,41 @@
 */
 typedef struct
 {
-    uint32_t          id;
-    fsync_listener_t *listener;
+    uint32_t                id;
+    fsync_listener_t       *listener;
 } fsync_listener_info_t;
 
 typedef struct
 {
-    uint32_t          listener_id;
-    fistream_t       *pistream;
+    time_t                  time;
+    uint32_t                listener_id;
+    uint32_t                sync_id;
+    fistream_t             *pistream;
 } fsync_src_t;
+
+typedef struct
+{
+    time_t                  time;
+    uint32_t                listener_id;
+    uint32_t                sync_id;
+} fsync_dst_t;
 
 struct sync_engine
 {
     volatile uint32_t       ref_counter;
+    volatile uint32_t       sync_id;
     fuuid_t                 uuid;
     fmsgbus_t              *msgbus;
     frstream_factory_t     *stream_factory;
+
+    pthread_mutex_t         listeners_mutex;
     fvector_t              *listeners;          // vector of fsync_listener_info_t
 
     pthread_mutex_t         sources_mutex;
     fvector_t              *sources;            // vector of fsync_src_t
+
+    pthread_mutex_t         destinations_mutex;
+    fvector_t              *destinations;       // vector of fsync_dst_t
 };
 
 static void fsync_engine_istream_listener(fsync_engine_t *pengine, fistream_t *pstream, uint32_t cookie)
@@ -56,7 +72,45 @@ static void fsync_request_handler(fsync_engine_t *pengine, FMSG_TYPE(sync_reques
 {
     if (memcmp(&msg->hdr.dst, &pengine->uuid, sizeof pengine->uuid) != 0)
         return;
-    // TODO
+
+    fsync_dst_t sync_dst =
+    {
+        time(0),
+        msg->listener_id,
+        msg->sync_id
+    };
+
+    ferr_t ret = FSUCCESS;
+
+    char const *err_msg = "";
+
+    fpush_lock(pengine->destinations_mutex);
+    if (!fvector_push_back(&pengine->destinations, &sync_dst))
+    {
+        FS_ERR(err_msg = "No memory for new synchronization stream");
+        ret = FERR_NO_MEM;
+    }
+    fpop_lock();
+
+    if (ret == FSUCCESS)
+    {
+        ret = frstream_factory_stream_request(pengine->stream_factory, &msg->hdr.src, msg->sync_id);
+        if (ret != FSUCCESS)
+            FS_ERR(err_msg = "Remoute stream request was failed");
+    }
+
+    if (ret != FSUCCESS)
+    {
+        FMSG(sync_failed, err, pengine->uuid, msg->hdr.src,
+            msg->listener_id,
+            msg->sync_id,
+            ret
+        );
+        strncpy(err.msg, err_msg, sizeof err.msg);
+
+        if (fmsgbus_publish(pengine->msgbus, FSYNC_FAILED, (fmsg_t const *)&err) != FSUCCESS)
+            FS_ERR("Synchronization error not published");
+    }
 }
 
 static void fsync_engine_msgbus_retain(fsync_engine_t *pengine, fmsgbus_t *pmsgbus)
@@ -92,6 +146,7 @@ fsync_engine_t *fsync_engine(fmsgbus_t *pmsgbus, fuuid_t const *uuid)
     pengine->uuid = *uuid;
     fsync_engine_msgbus_retain(pengine, pmsgbus);
 
+    pengine->listeners_mutex = PTHREAD_MUTEX_INITIALIZER;
     pengine->listeners = fvector(sizeof(fsync_listener_info_t), 0, 0);
     if (!pengine->listeners)
     {
@@ -105,6 +160,15 @@ fsync_engine_t *fsync_engine(fmsgbus_t *pmsgbus, fuuid_t const *uuid)
     if (!pengine->sources)
     {
         FS_ERR("Sources vector wasn't created");
+        fsync_engine_release(pengine);
+        return 0;
+    }
+
+    pengine->destinations_mutex = PTHREAD_MUTEX_INITIALIZER;
+    pengine->destinations = fvector(sizeof(fsync_dst_t), 0, 0);
+    if (!pengine->destinations)
+    {
+        FS_ERR("Destinations vector wasn't created");
         fsync_engine_release(pengine);
         return 0;
     }
@@ -164,6 +228,7 @@ void fsync_engine_release(fsync_engine_t *pengine)
             }
             fvector_release(pengine->listeners);
             fvector_release(pengine->sources);
+            fvector_release(pengine->destinations);
             free(pengine);
         }
     }
@@ -190,16 +255,20 @@ ferr_t fsync_engine_register_listener(fsync_engine_t *pengine, fsync_listener_t 
         listener->retain(listener)
     };
 
-    if (!fvector_push_back(&pengine->listeners, &listener_info))
+    ferr_t ret = FSUCCESS;
+
+    fpush_lock(pengine->listeners_mutex);
+    if (fvector_push_back(&pengine->listeners, &listener_info))
+        fvector_qsort(pengine->listeners, (fvector_comparer_t)listeners_comparer);
+    else
     {
         listener_info.listener->release(listener_info.listener);
         FS_ERR("No memory for new listener");
-        return FERR_NO_MEM;
+        ret = FERR_NO_MEM;
     }
+    fpop_lock();
 
-    fvector_qsort(pengine->listeners, (fvector_comparer_t)listeners_comparer);
-
-    return FSUCCESS;
+    return ret;
 }
 
 // src -- sync request --> dst
@@ -219,7 +288,9 @@ ferr_t fsync_engine_sync(fsync_engine_t *pengine, fuuid_t const *dst, uint32_t l
 
     fsync_src_t sync_src =
     {
+        time(0),
         listener_id,
+        ++pengine->sync_id,
         pstream->retain(pstream)
     };
 
@@ -239,6 +310,7 @@ ferr_t fsync_engine_sync(fsync_engine_t *pengine, fuuid_t const *dst, uint32_t l
 
     FMSG(sync_request, req, pengine->uuid, *dst,
         listener_id,
+        sync_src.sync_id,
         metainf.size
     );
     memcpy(req.metainf, metainf.data, metainf.size);

@@ -58,7 +58,14 @@ void *fvector_at(fvector_t *pvector, size_t idx)
     if (!pvector
         || idx >= pvector->size)
         return 0;
-    return (uint8_t*)(pvector + 1) + pvector->item_size * idx;
+    uint8_t *begin = (uint8_t*)(pvector + 1);
+    return begin + pvector->item_size * idx;
+}
+
+size_t fvector_idx(fvector_t const *pvector, void const *item)
+{
+    uint8_t const *begin = (uint8_t*)(pvector + 1);
+    return ((uint8_t const *)item - begin) / pvector->item_size;
 }
 
 size_t fvector_size(fvector_t const *pvector)
@@ -152,15 +159,15 @@ bool fvector_clear(fvector_t **pvector)
     return true;
 }
 
-void fvector_qsort(fvector_t *pvector, int (*compar)(const void *, const void*))
+void fvector_qsort(fvector_t *pvector, fvector_comparer_t pred)
 {
     if (pvector)
-        qsort(fvector_ptr(pvector), pvector->size, pvector->item_size, compar);
+        qsort(fvector_ptr(pvector), pvector->size, pvector->item_size, pred);
 }
 
-void *fvector_bsearch(fvector_t *pvector, void const* key, int (*compar)(const void *, const void*))
+void *fvector_bsearch(fvector_t *pvector, void const* key, fvector_comparer_t pred)
 {
     if (!pvector)
         return 0;
-    return bsearch(key, fvector_ptr(pvector), pvector->size, pvector->item_size, compar);
+    return bsearch(key, fvector_ptr(pvector), pvector->size, pvector->item_size, pred);
 }

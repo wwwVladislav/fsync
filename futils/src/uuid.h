@@ -15,7 +15,8 @@ typedef struct
 
 #define FUUID(...) { { { __VA_ARGS__ } } }
 
-bool fuuid_gen(fuuid_t *);
-char const * fuuid2str(fuuid_t const *, char *buf, size_t size);
+bool        fuuid_gen(fuuid_t *);
+int         fuuid_cmp(fuuid_t const *, fuuid_t const *);
+char const *fuuid2str(fuuid_t const *, char *buf, size_t size);
 
 #endif

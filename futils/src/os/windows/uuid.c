@@ -24,6 +24,15 @@ bool fuuid_gen(fuuid_t *uuid)
     return true;
 }
 
+int fuuid_cmp(fuuid_t const *lhs, fuuid_t const *rhs)
+{
+    if (lhs->data.u64[0] < rhs->data.u64[0]) return -1;
+    if (lhs->data.u64[0] > rhs->data.u64[0]) return 1;
+    if (lhs->data.u64[1] < rhs->data.u64[1]) return -1;
+    if (lhs->data.u64[1] > rhs->data.u64[1]) return 1;
+    return 0;
+}
+
 char const * fuuid2str(fuuid_t const *uuid, char *buf, size_t size)
 {
     snprintf(buf, size, "%08llx%08llx", uuid->data.u64[0], uuid->data.u64[1]);

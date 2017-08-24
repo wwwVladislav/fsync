@@ -29,17 +29,17 @@ typedef struct
 
 typedef struct
 {
-    time_t                  time;
     uint32_t                listener_id;
     uint32_t                sync_id;
+    time_t                  time;
     fistream_t             *pistream;
 } fsync_src_t;
 
 typedef struct
 {
-    time_t                  time;
     uint32_t                listener_id;
     uint32_t                sync_id;
+    time_t                  time;
 } fsync_dst_t;
 
 struct sync_engine
@@ -60,6 +60,60 @@ struct sync_engine
     fvector_t              *destinations;       // vector of fsync_dst_t
 };
 
+static int fsync_listeners_cmp(fsync_listener_info_t const *lhs, fsync_listener_info_t const *rhs)
+{
+    return (int)lhs->id - rhs->id;
+}
+
+static int fsync_srcs_cmp(fsync_src_t const *lhs, fsync_src_t const *rhs)
+{
+    int a = (int)lhs->listener_id - rhs->listener_id;
+    return a ? a: (int)lhs->sync_id - rhs->sync_id;
+}
+
+static int fsync_dsts_cmp(fsync_dst_t const *lhs, fsync_dst_t const *rhs)
+{
+    int a = (int)lhs->listener_id - rhs->listener_id;
+    return a ? a: (int)lhs->sync_id - rhs->sync_id;
+}
+
+static bool fsync_add_src(fsync_engine_t *pengine, fsync_src_t const *src)
+{
+    src->pistream->retain(src->pistream);
+
+    bool ret = true;
+    fpush_lock(pengine->sources_mutex);
+    if (fvector_push_back(&pengine->sources, src))
+        fvector_qsort(pengine->sources, (fvector_comparer_t)fsync_srcs_cmp);
+    else
+    {
+        src->pistream->release(src->pistream);
+        FS_ERR("No memory for new synchronization stream");
+        ret = false;
+    }
+    fpop_lock();
+    return ret;
+}
+
+static void fsync_remove_src(fsync_engine_t *pengine, uint32_t listener_id, uint32_t sync_id)
+{
+    fsync_src_t const src =
+    {
+        listener_id,
+        sync_id
+    };
+
+    fpush_lock(pengine->sources_mutex);
+    fsync_src_t const *psrc = (fsync_src_t const *)fvector_bsearch(pengine->sources, &src, (fvector_comparer_t)fsync_srcs_cmp);
+    if (psrc)
+    {
+        psrc->pistream->release(psrc->pistream);
+        size_t item_idx = fvector_idx(pengine->sources, psrc);
+        fvector_erase(&pengine->sources, item_idx);
+    }
+    fpop_lock();
+}
+
 static void fsync_engine_istream_listener(fsync_engine_t *pengine, fistream_t *pstream, uint32_t cookie)
 {
 }
@@ -75,9 +129,9 @@ static void fsync_request_handler(fsync_engine_t *pengine, FMSG_TYPE(sync_reques
 
     fsync_dst_t sync_dst =
     {
-        time(0),
         msg->listener_id,
-        msg->sync_id
+        msg->sync_id,
+        time(0)
     };
 
     ferr_t ret = FSUCCESS;
@@ -113,15 +167,25 @@ static void fsync_request_handler(fsync_engine_t *pengine, FMSG_TYPE(sync_reques
     }
 }
 
+static void fsync_failure_handler(fsync_engine_t *pengine, FMSG_TYPE(sync_failed) const *msg)
+{
+    if (memcmp(&msg->hdr.dst, &pengine->uuid, sizeof pengine->uuid) != 0)
+        return;
+    fsync_remove_src(pengine, msg->listener_id, msg->sync_id);
+    FS_ERR("Synchronization was failed. Reason: \'%s\'", msg->msg);
+}
+
 static void fsync_engine_msgbus_retain(fsync_engine_t *pengine, fmsgbus_t *pmsgbus)
 {
     pengine->msgbus = fmsgbus_retain(pmsgbus);
     fmsgbus_subscribe(pengine->msgbus, FSYNC_REQUEST,   (fmsg_handler_t)fsync_request_handler,  pengine);
+    fmsgbus_subscribe(pengine->msgbus, FSYNC_FAILED,    (fmsg_handler_t)fsync_failure_handler,  pengine);
 }
 
 static void fsync_engine_msgbus_release(fsync_engine_t *pengine)
 {
     fmsgbus_unsubscribe(pengine->msgbus, FSYNC_REQUEST, (fmsg_handler_t)fsync_request_handler);
+    fmsgbus_unsubscribe(pengine->msgbus, FSYNC_FAILED,  (fmsg_handler_t)fsync_failure_handler);
     fmsgbus_release(pengine->msgbus);
 }
 
@@ -236,11 +300,6 @@ void fsync_engine_release(fsync_engine_t *pengine)
         FS_ERR("Invalid sync engine");
 }
 
-static int listeners_comparer(const fsync_listener_info_t *lhs, const fsync_listener_info_t *rhs)
-{
-    return lhs->id < rhs->id;
-}
-
 ferr_t fsync_engine_register_listener(fsync_engine_t *pengine, fsync_listener_t *listener)
 {
     if (!pengine || !listener)
@@ -259,7 +318,7 @@ ferr_t fsync_engine_register_listener(fsync_engine_t *pengine, fsync_listener_t 
 
     fpush_lock(pengine->listeners_mutex);
     if (fvector_push_back(&pengine->listeners, &listener_info))
-        fvector_qsort(pengine->listeners, (fvector_comparer_t)listeners_comparer);
+        fvector_qsort(pengine->listeners, (fvector_comparer_t)fsync_listeners_cmp);
     else
     {
         listener_info.listener->release(listener_info.listener);
@@ -288,23 +347,13 @@ ferr_t fsync_engine_sync(fsync_engine_t *pengine, fuuid_t const *dst, uint32_t l
 
     fsync_src_t sync_src =
     {
-        time(0),
         listener_id,
         ++pengine->sync_id,
-        pstream->retain(pstream)
+        time(0),
+        pstream
     };
 
-    ferr_t ret = FSUCCESS;
-
-    fpush_lock(pengine->sources_mutex);
-    if (!fvector_push_back(&pengine->sources, &sync_src))
-    {
-        FS_ERR("No memory for new synchronization stream");
-        sync_src.pistream->release(sync_src.pistream);
-        ret = FERR_NO_MEM;
-    }
-    fpop_lock();
-
+    ferr_t ret = fsync_add_src(pengine, &sync_src) ? FSUCCESS : FERR_NO_MEM;
     if (ret != FSUCCESS)
         return ret;
 
@@ -317,12 +366,7 @@ ferr_t fsync_engine_sync(fsync_engine_t *pengine, fuuid_t const *dst, uint32_t l
 
     ret = fmsgbus_publish(pengine->msgbus, FSYNC_REQUEST, (fmsg_t const *)&req);
     if (ret != FSUCCESS)
-    {
-        sync_src.pistream->release(sync_src.pistream);
-        fpush_lock(pengine->sources_mutex);
-        fvector_pop_back(&pengine->sources);
-        fpop_lock();
-    }
+        fsync_remove_src(pengine, listener_id, sync_src.sync_id);
 
     return ret;
 }

@@ -12,4 +12,8 @@ set(BINN_SOURCES
     ${BINN_ROOT}/src/binn.c
 )
 
+if (CMAKE_COMPILER_IS_GNUCXX)
+    add_definitions(-Wformat=0)
+endif()
+
 add_library(binn SHARED ${BINN_HEADERS} ${BINN_SOURCES})

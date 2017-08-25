@@ -40,6 +40,10 @@ include_directories(
 
 use_c99()
 
+if (CMAKE_COMPILER_IS_GNUCXX)
+    add_definitions(-pedantic)
+endif ()
+
 add_library(fsync SHARED ${FSYNC_HEADERS} ${FSYNC_SOURCES})
 add_dependencies(fsync futils fdb)
 target_link_libraries(fsync futils fdb ${LIBRSYNC_LIBRARIES})

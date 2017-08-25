@@ -49,6 +49,10 @@ endif (WIN32)
 
 use_c99()
 
+if (CMAKE_COMPILER_IS_GNUCXX)
+    add_definitions(-pedantic)
+endif ()
+
 add_library(fnet STATIC ${FNET_HEADERS} ${FNET_SOURCES})
 add_dependencies(fnet futils)
 target_link_libraries(fnet ${FNET_LIBS})

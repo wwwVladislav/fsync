@@ -12,6 +12,10 @@ set(FCLIENT_SOURCES
 
 find_package(LIBRSYNC REQUIRED)
 
+if (CMAKE_COMPILER_IS_GNUCXX)
+    add_definitions(-pedantic)
+endif ()
+
 include_directories(
     ../fdb/include
     ../fsync/include

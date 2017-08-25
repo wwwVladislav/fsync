@@ -35,7 +35,13 @@ int fuuid_cmp(fuuid_t const *lhs, fuuid_t const *rhs)
 
 char const * fuuid2str(fuuid_t const *uuid, char *buf, size_t size)
 {
-    snprintf(buf, size, "%08llx%08llx", uuid->data.u64[0], uuid->data.u64[1]);
+    static char const hex[] = "0123456789ABCDEF";
+    size = size < 2 * sizeof uuid->data.u8 ? size : 2 * sizeof uuid->data.u8;
+    for(int i = 0; i < size; ++i)
+    {
+        uint8_t const d = (uuid->data.u8[i / 2] >> ((1 - i % 2) * 4)) & 0xF;
+        buf[i] = hex[d];
+    }
     return buf;
 }
 

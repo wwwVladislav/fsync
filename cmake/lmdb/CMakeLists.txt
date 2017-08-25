@@ -22,7 +22,7 @@ if(MSVC)
     add_definitions(-FI stdafx.h)
 else()
     # GCC or Clang
-    add_definitions(-include stdafx.h)
+    add_definitions(-include stdafx.h -Wformat=0 -Wno-int-conversion)
 endif()
 
 add_library(lmdb SHARED ${LMDB_HEADERS} ${LMDB_SOURCES})

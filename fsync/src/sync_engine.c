@@ -42,6 +42,7 @@ typedef struct
     uint32_t                listener_id;
     uint32_t                sync_id;
     time_t                  time;
+    fostream_t             *signature_ostream;
 } fsync_dst_t;
 
 struct sync_engine
@@ -157,14 +158,16 @@ static void fsync_remove_dst(fsync_engine_t *pengine, fuuid_t const *src, uint32
     fpop_lock();
 }
 
-static void fsync_engine_istream_listener(fsync_engine_t *pengine, fistream_t *pstream, uint32_t cookie)
+static void fsync_engine_istream_listener(fsync_engine_t *pengine, fistream_t *pstream, uint32_t sync_id)
 {
 }
 
-static void fsync_engine_ostream_listener(fsync_engine_t *pengine, fostream_t *pstream, uint32_t cookie)
+static void fsync_engine_ostream_listener(fsync_engine_t *pengine, fostream_t *pstream, uint32_t sync_id)
 {
+    // signature_ostream
 }
 
+// FSYNC_REQUEST handler
 static void fsync_request_handler(fsync_engine_t *pengine, FMSG_TYPE(sync_request) const *msg)
 {
     if (memcmp(&msg->hdr.dst, &pengine->uuid, sizeof pengine->uuid) != 0)
@@ -206,6 +209,7 @@ static void fsync_request_handler(fsync_engine_t *pengine, FMSG_TYPE(sync_reques
     }
 }
 
+// FSYNC_FAILED handler
 static void fsync_failure_handler(fsync_engine_t *pengine, FMSG_TYPE(sync_failed) const *msg)
 {
     if (memcmp(&msg->hdr.dst, &pengine->uuid, sizeof pengine->uuid) != 0)

@@ -56,5 +56,9 @@ include_directories(
 
 use_c99()
 
+if (CMAKE_COMPILER_IS_GNUCXX)
+    add_definitions(-pedantic)
+endif ()
+
 add_library(futils STATIC ${FUTILS_HEADERS} ${FUTILS_SOURCES})
 target_link_libraries(futils ${FUTILS_LIBS})

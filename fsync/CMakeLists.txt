@@ -33,6 +33,7 @@ message(STATUS "LIBRSYNC_INCLUDES = ${LIBRSYNC_INCLUDES}")
 
 include_directories(
     ${LIBRSYNC_INCLUDES}
+    ${BINN_INCLUDES}
     ../futils/include
     ../fcommon/include
     ../fdb/include
@@ -45,5 +46,5 @@ if (CMAKE_COMPILER_IS_GNUCXX)
 endif ()
 
 add_library(fsync SHARED ${FSYNC_HEADERS} ${FSYNC_SOURCES})
-add_dependencies(fsync futils fdb)
-target_link_libraries(fsync futils fdb ${LIBRSYNC_LIBRARIES})
+add_dependencies(fsync futils fdb binn)
+target_link_libraries(fsync futils fdb binn ${LIBRSYNC_LIBRARIES})

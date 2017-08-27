@@ -11,10 +11,10 @@
 #include <time.h>
 
 /*
-         synchronization
-    src ------ DATA ------> dst
-        -- sync request -->
-        <-- ostream req ---
+ *        synchronization
+ *  src ------ DATA ------> dst
+ *      -- sync request -->
+ *      <-- ostream req ---
         --- ostream ------>
         <-- [signature] ---
         --- ostream req -->
@@ -86,6 +86,7 @@ static int fsync_dsts_cmp(fsync_dst_t const *lhs, fsync_dst_t const *rhs)
     return (int)lhs->sync_id - rhs->sync_id;
 }
 
+#if 0
 static bool fsync_add_src(fsync_engine_t *pengine, fsync_src_t const *src)
 {
     src->pistream->retain(src->pistream);
@@ -414,3 +415,4 @@ ferr_t fsync_engine_sync(fsync_engine_t *pengine, fuuid_t const *dst, uint32_t l
 
     return ret;
 }
+#endif

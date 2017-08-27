@@ -7,16 +7,33 @@
 
 typedef enum
 {
-    FNODE_STATUS = 1,       // node_status
-    FSYNC_FILES_LIST,       // sync_files_list
-    FFILE_PART_REQUEST,     // file_part_request
-    FFILE_PART,             // file_part
-    FSTREAM_REQUEST,        // stream_request
-    FSTREAM,                // stream
-    FSTREAM_DATA,           // stream_data
-    FSYNC_REQUEST,          // sync_request
-    FSYNC_FAILED            // sync_failed
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Nodes
+    FNODE_STATUS = 1,               // node_status
+    FNODE_CONNECTED,                // node_connected
+    FNODE_DISCONNECTED,             // node_disconnected
+
+    FSYNC_FILES_LIST,               // sync_files_list
+    FFILE_PART_REQUEST,             // file_part_request
+    FFILE_PART,                     // file_part
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Remote streams
+    FSTREAM,                        // stream
+    FSTREAM_ACCEPT,                 // stream_accept
+    FSTREAM_REJECT,                 // stream_reject
+    FSTREAM_FAILED,                 // stream_failed
+    FSTREAM_CLOSED,                 // stream_closed
+    FSTREAM_DATA,                   // stream_data
+
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Synchronization
+    FSYNC_REQUEST,                  // sync_request
+    FSYNC_FAILED                    // sync_failed
 } fmessage_t;
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Nodes
 
 enum
 {
@@ -27,6 +44,15 @@ enum
 FMSG_DEF(node_status,
     uint32_t status;
 )
+
+FMSG_DEF(node_connected,
+)
+
+FMSG_DEF(node_disconnected,
+)
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
 
 typedef struct
 {
@@ -55,34 +81,55 @@ FMSG_DEF(file_part,
     uint8_t                 data[FSYNC_BLOCK_SIZE];
 )
 
-FMSG_DEF(stream_request,
-    uint32_t                cookie;                     // cookie (can contain some useful ID, for example, source component ID)
-)
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Remote streams
 
 FMSG_DEF(stream,
-    uint32_t                id;                         // stream id
-    uint32_t                cookie;                     // cookie (can contain some useful ID, for example, source component ID)
+    uint32_t                stream_id;                      // stream id
+    uint32_t                metainf_size;                   // meta information size
+    uint8_t                 metainf[FMAX_METAINF_SIZE];     // meta information
+)
+
+FMSG_DEF(stream_accept,
+    uint32_t                stream_id;                      // stream id
+)
+
+FMSG_DEF(stream_reject,
+    uint32_t                stream_id;                      // stream id
+)
+
+FMSG_DEF(stream_failed,
+    uint32_t                stream_id;                      // stream id
+    uint32_t                err;                            // error code
+    char                    msg[FMAX_ERROR_MSG_LEN];        // error message
+)
+
+FMSG_DEF(stream_closed,
+    uint32_t                stream_id;                      // stream id
 )
 
 FMSG_DEF(stream_data,
-    uint32_t                id;                         // stream id
-    uint64_t                offset;                     // offset
-    uint16_t                size;                       // data size
-    uint8_t                 data[FSYNC_BLOCK_SIZE];     // data
+    uint32_t                stream_id;                      // stream id
+    uint64_t                offset;                         // offset
+    uint16_t                size;                           // data size
+    uint8_t                 data[FSYNC_BLOCK_SIZE];         // data
 )
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Synchronization
+
 FMSG_DEF(sync_request,
-    uint32_t                listener_id;                // synchronization listener id
-    uint32_t                sync_id;                    // synchronization id
-    uint32_t                metainf_size;               // meta information size
-    uint8_t                 metainf[FMAX_METAINF_SIZE]; // meta information
+    uint32_t                listener_id;                    // synchronization listener id
+    uint32_t                sync_id;                        // synchronization id
+    uint32_t                metainf_size;                   // meta information size
+    uint8_t                 metainf[FMAX_METAINF_SIZE];     // meta information
 )
 
 FMSG_DEF(sync_failed,
-    uint32_t                listener_id;                // synchronization listener id
-    uint32_t                sync_id;                    // synchronization id
-    uint32_t                err;                        // error code
-    char                    msg[FMAX_ERROR_MSG_LEN];    // error message
+    uint32_t                listener_id;                    // synchronization listener id
+    uint32_t                sync_id;                        // synchronization id
+    uint32_t                err;                            // error code
+    char                    msg[FMAX_ERROR_MSG_LEN];        // error message
 )
 
 #endif

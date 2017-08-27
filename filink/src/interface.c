@@ -106,17 +106,30 @@ static bool filink_add_node(filink_t *ilink, fnet_client_t *pclient, fuuid_t con
         FS_ERR("The maximum allowed connections number is reached");
     }
     fpop_lock();
+
+    if (ret)
+    {
+        FMSG(node_connected, connected, *uuid, ilink->uuid, );
+        if (fmsgbus_publish(ilink->msgbus, FNODE_CONNECTED, (fmsg_t const *)&connected) != FSUCCESS)
+            FS_ERR("Unable to publish message");
+    }
+
     return ret;
 }
 
 static void filink_remove_node(filink_t *ilink, fnet_client_t *pclient)
 {
+    bool removed = false;
+    fuuid_t peer_uuid = { 0 };
+
     fpush_lock(ilink->nodes_mutex);
     size_t i = 0;
     for(; i < ilink->nodes_num; ++i)
     {
         if (ilink->nodes[i].transport == pclient)
         {
+            removed = true;
+            peer_uuid = ilink->nodes[i].uuid;
             fnet_disconnect(pclient);
             break;
         }
@@ -128,6 +141,13 @@ static void filink_remove_node(filink_t *ilink, fnet_client_t *pclient)
     ilink->nodes[ilink->nodes_num].transport = 0;
 
     fpop_lock();
+
+    if (removed)
+    {
+        FMSG(node_disconnected, disconnected, peer_uuid, ilink->uuid, );
+        if (fmsgbus_publish(ilink->msgbus, FNODE_DISCONNECTED, (fmsg_t const *)&disconnected) != FSUCCESS)
+            FS_ERR("Unable to publish message");
+    }
 }
 
 static void filink_broadcast_message(filink_t *ilink, fproto_msg_t msg, void const *data)

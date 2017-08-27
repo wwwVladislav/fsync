@@ -13,6 +13,7 @@ set(FTEST_SOURCES
 )
 
 include_directories(
+    ${BINN_INCLUDES}
     ../fdb/include
     ../futils/include
     ../fcommon/include
@@ -24,5 +25,5 @@ if (CMAKE_COMPILER_IS_GNUCXX)
 endif ()
 
 add_executable(ftest ${FTEST_HEADERS} ${FTEST_SOURCES})
-add_dependencies(ftest fdb futils fsync)
-target_link_libraries(ftest fdb futils fsync)
+add_dependencies(ftest fdb futils fsync binn)
+target_link_libraries(ftest fdb futils fsync binn)

@@ -265,21 +265,11 @@ FTEST_END()
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 static fistream_t *pistream = 0;
-static uint32_t istream_cookie = 0;
-
 static fostream_t *postream = 0;
-static uint32_t ostream_cookie = 0;
 
-static void fristream_listener(void *ptr, fistream_t *pstream, uint32_t cookie)
+static void fristream_listener(void *ptr, fistream_t *pstream, frstream_info_t const *info)
 {
     pistream = pstream->retain(pstream);
-    istream_cookie = cookie;
-}
-
-static void frostream_listener(void *ptr, fostream_t *pstream, uint32_t cookie)
-{
-    postream = pstream->retain(pstream);
-    ostream_cookie = cookie;
 }
 
 FTEST_START(frstream)
@@ -296,17 +286,13 @@ FTEST_START(frstream)
     if (rstream_factory)
     {
         rc = frstream_factory_istream_subscribe(rstream_factory, fristream_listener, 0);    assert(rc == FSUCCESS);
-        rc = frstream_factory_ostream_subscribe(rstream_factory, frostream_listener, 0);    assert(rc == FSUCCESS);
-        rc = frstream_factory_stream_request(rstream_factory, &uuid, 42);                   assert(rc == FSUCCESS);
+        postream = frstream_factory_stream(rstream_factory, &uuid, 0);                      assert(postream != 0);
 
         while (!postream || !pistream)
         {
             static struct timespec const F1_SEC = { 1, 0 };
             nanosleep(&F1_SEC, NULL);
         }
-
-        assert(istream_cookie == 42);
-        assert(ostream_cookie == 42);
 
         size_t written = postream->write(postream, FDATA, sizeof FDATA);                    assert(written == sizeof FDATA);
 
@@ -315,9 +301,35 @@ FTEST_START(frstream)
         assert(memcmp(FDATA, tmp, sizeof FDATA) == 0);
 
         rc = frstream_factory_istream_unsubscribe(rstream_factory, fristream_listener);     assert(rc == FSUCCESS);
-        rc = frstream_factory_ostream_unsubscribe(rstream_factory, frostream_listener);     assert(rc == FSUCCESS);
         if (pistream) pistream->release(pistream);
         if (postream) postream->release(postream);
+        frstream_factory_release(rstream_factory);
+    }
+
+    fmsgbus_release(msgbus);
+}
+FTEST_END()
+
+FTEST_START(frstream_fail)
+{
+    fmsgbus_t *msgbus = 0;
+    static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+
+    assert(fmsgbus_create(&msgbus) == FSUCCESS);
+
+    frstream_factory_t *rstream_factory = frstream_factory(msgbus, &uuid);
+    assert(rstream_factory != 0);
+
+    if (rstream_factory)
+    {
+        fostream_t *pstream = frstream_factory_stream(rstream_factory, &uuid, 0);           assert(postream != 0);
+
+        static struct timespec const F1_SEC = { 1, 0 };
+        nanosleep(&F1_SEC, NULL);
+
+        fstream_status_t status = pstream->status(pstream);                                 assert(status == FSTREAM_STATUS_CLOSED);
+
+        if (pstream) pstream->release(pstream);
         frstream_factory_release(rstream_factory);
     }
 
@@ -343,7 +355,7 @@ FTEST_START(fsync_engine)
     fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     assert(fmsgbus_create(&msgbus) == FSUCCESS);
-
+/*
     fsync_engine_t *psync_engine = fsync_engine(msgbus, &uuid);                             assert(psync_engine);
     if (psync_engine)
     {
@@ -356,7 +368,7 @@ FTEST_START(fsync_engine)
         // TODO
         fsync_engine_release(psync_engine);
     }
-
+*/
     fmsgbus_release(msgbus);
     fmem_iostream_release(src_stream);
     src_istream->release(src_istream);
@@ -366,5 +378,6 @@ FTEST_END()
 FUNIT_TEST_START(fsync)
     FTEST(frsync_algorithm);
     FTEST(frstream);
+    FTEST(frstream_fail);
     FTEST(fsync_engine);
 FUNIT_TEST_END()

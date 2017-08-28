@@ -219,6 +219,12 @@ static size_t fmem_ostream_write(fostream_t *postream, char const *data, size_t 
     return fmem_iostream_write(pmem_ostream->piostream, data, size);
 }
 
+static fstream_status_t fmem_ostream_status(fostream_t *postream)
+{
+    (void)postream;
+    return FSTREAM_STATUS_OK;
+}
+
 fostream_t *fmem_ostream(fmem_iostream_t *piostream)
 {
     if (!piostream)
@@ -238,6 +244,7 @@ fostream_t *fmem_ostream(fmem_iostream_t *piostream)
     postream->ostream.release = fmem_ostream_release;
     postream->ostream.write = fmem_ostream_write;
     postream->ostream.seek = 0; // Not supported
+    postream->ostream.status = fmem_ostream_status;
     postream->ref_counter = 1;
     postream->piostream = fmem_iostream_retain(piostream);
 
@@ -296,6 +303,12 @@ static size_t fmem_istream_read(fistream_t *pistream, char *data, size_t size)
     return fmem_iostream_read(pmem_istream->piostream, data, size);
 }
 
+static fstream_status_t fmem_istream_status(fistream_t *pistream)
+{
+    (void)pistream;
+    return FSTREAM_STATUS_OK;
+}
+
 fistream_t *fmem_istream(fmem_iostream_t *piostream)
 {
     if (!piostream)
@@ -315,6 +328,7 @@ fistream_t *fmem_istream(fmem_iostream_t *piostream)
     pistream->istream.release = fmem_istream_release;
     pistream->istream.read = fmem_istream_read;
     pistream->istream.seek = 0; // Not supported
+    pistream->istream.status = fmem_istream_status;
     pistream->ref_counter = 1;
     pistream->piostream = fmem_iostream_retain(piostream);
 

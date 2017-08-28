@@ -355,12 +355,11 @@ FTEST_START(fsync_engine)
     fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     assert(fmsgbus_create(&msgbus) == FSUCCESS);
-/*
+
     fsync_engine_t *psync_engine = fsync_engine(msgbus, &uuid);                             assert(psync_engine);
     if (psync_engine)
     {
-        fsync_metainf_t metainf = { 0 };
-        rc = fsync_engine_sync(psync_engine, &uuid, 42, metainf, src_istream);               assert(rc == FSUCCESS);
+        rc = fsync_engine_sync(psync_engine, &uuid, 42, 0, src_istream);                    assert(rc == FSUCCESS);
 
         static struct timespec const F10_SEC = { 10, 0 };
         nanosleep(&F10_SEC, NULL);
@@ -368,7 +367,7 @@ FTEST_START(fsync_engine)
         // TODO
         fsync_engine_release(psync_engine);
     }
-*/
+
     fmsgbus_release(msgbus);
     fmem_iostream_release(src_stream);
     src_istream->release(src_istream);

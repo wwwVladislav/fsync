@@ -48,6 +48,7 @@ struct sync_engine
     fuuid_t                 uuid;
     fmsgbus_t              *msgbus;
     frstream_factory_t     *stream_factory;
+    fmsgbus_t              *sync_handler;
 
     pthread_mutex_t         listeners_mutex;
     fvector_t              *listeners;                  // vector of fsync_listener_t*
@@ -434,6 +435,13 @@ fsync_engine_t *fsync_engine(fmsgbus_t *pmsgbus, fuuid_t const *uuid)
     pengine->uuid = *uuid;
     fsync_engine_msgbus_retain(pengine, pmsgbus);
 
+    if (fmsgbus_create(&pengine->sync_handler, FDATA_SYNC_THREADS_NUM) != FSUCCESS)
+    {
+        FS_ERR("Synchronization threads wasn't started");
+        fsync_engine_release(pengine);
+        return 0;
+    }
+
     pengine->listeners_mutex = PTHREAD_MUTEX_INITIALIZER;
     pengine->listeners = fvector(sizeof(fsync_listener_t*), 0, 0);
     if (!pengine->listeners)
@@ -498,6 +506,9 @@ void fsync_engine_release(fsync_engine_t *pengine)
             FS_ERR("Invalid sync engine");
         else if (!--pengine->ref_counter)
         {
+            if (pengine->sync_handler)
+                fmsgbus_release(pengine->sync_handler);
+
             fsync_engine_msgbus_release(pengine);
             if (pengine->stream_factory)
             {

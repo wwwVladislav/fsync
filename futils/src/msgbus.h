@@ -31,7 +31,7 @@ typedef struct fmsg
 
 typedef void(*fmsg_handler_t)(void *, fmsg_t const *);
 
-ferr_t     fmsgbus_create     (fmsgbus_t **ppmsgbus);
+ferr_t     fmsgbus_create     (fmsgbus_t **ppmsgbus, uint32_t threads_num);
 fmsgbus_t *fmsgbus_retain     (fmsgbus_t *pmsgbus);
 void       fmsgbus_release    (fmsgbus_t *pmsgbus);
 ferr_t     fmsgbus_subscribe  (fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t handler, void *param);

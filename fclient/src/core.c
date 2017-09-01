@@ -71,7 +71,7 @@ fcore_t *fcore_start(char const *addr)
     if (!fdb_save_config(pcore->db, &pcore->config))
         FS_ERR("Current configuration doesn't saved");
 
-    if (fmsgbus_create(&pcore->msgbus) != FSUCCESS)
+    if (fmsgbus_create(&pcore->msgbus, FMSGBUS_THREADS_NUM) != FSUCCESS)
     {
         FS_ERR("Messages bus not initialized");
         fcore_stop(pcore);

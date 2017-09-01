@@ -4,6 +4,7 @@
 enum
 {
     FMAX_CONNECTIONS_NUM        = 128,      // Maximum allowed connections
+    FMSGBUS_THREADS_NUM         = 8,        // Threads number for messages handling
     FMAX_PATH                   = 1024,     // Max file path length
     FMAX_FILENAME               = 260,      // Max file name length
     FMAX_DIR_DEPTH              = 512,      // Max directories depth

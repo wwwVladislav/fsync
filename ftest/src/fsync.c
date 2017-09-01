@@ -278,7 +278,7 @@ FTEST_START(frstream)
     fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 
-    assert(fmsgbus_create(&msgbus) == FSUCCESS);
+    assert(fmsgbus_create(&msgbus, 4) == FSUCCESS);
 
     frstream_factory_t *rstream_factory = frstream_factory(msgbus, &uuid);
     assert(rstream_factory != 0);
@@ -315,7 +315,7 @@ FTEST_START(frstream_fail)
     fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 
-    assert(fmsgbus_create(&msgbus) == FSUCCESS);
+    assert(fmsgbus_create(&msgbus, 4) == FSUCCESS);
 
     frstream_factory_t *rstream_factory = frstream_factory(msgbus, &uuid);
     assert(rstream_factory != 0);
@@ -371,7 +371,7 @@ FTEST_START(fsync_engine)
 
     fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-    assert(fmsgbus_create(&msgbus) == FSUCCESS);
+    assert(fmsgbus_create(&msgbus, 4) == FSUCCESS);
 
     fsync_engine_t *psync_engine = fsync_engine(msgbus, &uuid);                             assert(psync_engine);
     if (psync_engine)
@@ -386,8 +386,8 @@ FTEST_START(fsync_engine)
         rc = fsync_engine_register_listener(psync_engine, &listener);                       assert(rc == FSUCCESS);
         rc = fsync_engine_sync(psync_engine, &uuid, 42, 0, src_istream);                    assert(rc == FSUCCESS);
 
-        static struct timespec const F60_SEC = { 60, 0 };
-        nanosleep(&F60_SEC, NULL);
+        //static struct timespec const F60_SEC = { 60, 0 };
+        //nanosleep(&F60_SEC, NULL);
 
         // TODO
         fsync_engine_release(psync_engine);

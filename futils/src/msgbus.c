@@ -77,7 +77,7 @@ typedef struct
 enum
 {
     FMSGBUS_MAX_HANDLERS = 256,
-    FMSGBUS_MAX_THREADS  = 8
+    FMSGBUS_MAX_THREADS  = 16
 };
 
 struct fmsgbus
@@ -91,12 +91,13 @@ struct fmsgbus
     uint8_t               buf[1024 * 1024];
     fring_queue_t        *messages;
 
+    uint32_t              threads_num;
     fmsgbus_thread_t      threads[FMSGBUS_MAX_THREADS];
 };
 
 static bool fmsgbus_msg_handle(fmsgbus_t *msgbus, uint32_t msg_type, fmsg_t *msg)
 {
-    for(uint32_t thread_id = 0; thread_id < FMSGBUS_MAX_THREADS; ++thread_id)
+    for(uint32_t thread_id = 0; thread_id < msgbus->threads_num; ++thread_id)
     {
         fmsgbus_thread_t *thread = &msgbus->threads[thread_id];
         if (thread->is_active
@@ -265,13 +266,18 @@ static void *fmsgbus_thread(void *param)
     return 0;
 }
 
-ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus)
+ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus, uint32_t threads_num)
 {
     if (!ppmsgbus)
     {
         FS_ERR("Invalid arguments");
         return FERR_INVALID_ARG;
     }
+
+    if (!threads_num)
+        threads_num = 1;
+    else if (threads_num > FMSGBUS_MAX_THREADS)
+        threads_num = FMSGBUS_MAX_THREADS;
 
     fmsgbus_t *pmsgbus = malloc(sizeof(fmsgbus_t));
     if (!pmsgbus)
@@ -283,6 +289,7 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus)
 
     pmsgbus->ref_counter = 1;
     pmsgbus->messages_mutex = PTHREAD_MUTEX_INITIALIZER;
+    pmsgbus->threads_num = threads_num;
 
     for(int i = 0; i < FMSGBUS_MAX_HANDLERS; ++i)
         pmsgbus->handlers[i].mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -301,7 +308,7 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus)
         return ret;
     }
 
-    for(uint32_t i = 0; i < FMSGBUS_MAX_THREADS; ++i)
+    for(uint32_t i = 0; i < pmsgbus->threads_num; ++i)
     {
         if (sem_init(&pmsgbus->threads[i].sem, 0, 0) == -1)
         {
@@ -364,7 +371,7 @@ void fmsgbus_release(fmsgbus_t *pmsgbus)
             pthread_join(pmsgbus->ctrl_thread.thread, 0);
             sem_destroy(&pmsgbus->messages_sem);
 
-            for(uint32_t i = 0; i < FMSGBUS_MAX_THREADS; ++i)
+            for(uint32_t i = 0; i < pmsgbus->threads_num; ++i)
             {
                 pmsgbus->threads[i].is_active = false;
                 sem_post(&pmsgbus->threads[i].sem);

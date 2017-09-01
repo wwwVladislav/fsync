@@ -315,7 +315,8 @@ typedef struct
 static frostream_t     *frostream_retain (frostream_t *pstream);
 static bool             frostream_release(frostream_t *pstream);
 static size_t           frostream_write  (frostream_t *pstream, char const *data, size_t const size);
-static fstream_status_t frostream_status(frostream_t *pstream);
+static fstream_status_t frostream_status (frostream_t *pstream);
+static void             frostream_close  (frostream_t *pstream);
 
 void frostream_accept_handler(frostream_t *pstream, FMSG_TYPE(stream_accept) const *msg)
 {
@@ -391,7 +392,6 @@ static frostream_t *frostream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src
     pstream->ostream.release = (fostream_release_fn_t)frostream_release;
     pstream->ostream.write   = (fostream_write_fn_t)frostream_write;
     pstream->ostream.status  = (fostream_status_fn_t)frostream_status;
-    
 
     pstream->ref_counter = 1;
     pstream->status = FSTREAM_STATUS_INIT;
@@ -420,6 +420,7 @@ static bool frostream_release(frostream_t *pstream)
             FS_ERR("Invalid ostream");
         else if (!--pstream->ref_counter)
         {
+            frostream_close(pstream);
             if (pstream->msgbus)
                 frostream_msgbus_release(pstream);
             memset(pstream, 0, sizeof *pstream);
@@ -648,19 +649,24 @@ static ferr_t frstream_factory_stream_msg_handler(frstream_factory_t *pfactory, 
 
             pfactory->ilisteners[i].listener(pfactory->ilisteners[i].param, (fistream_t*)pistream, &rstream_info);
 
-            fristream_release(pistream);
+            bool istream_is_released = fristream_release(pistream);
             if (obj) binn_free(obj);
 
-            char str[2 * sizeof(fuuid_t) + 1] = { 0 };
-            FS_ERR("Input stream was accepted. Source: %s", fuuid2str(&msg->source, str, sizeof str));
+            if (!istream_is_released)
+            {
+                char str[2 * sizeof(fuuid_t) + 1] = { 0 };
+                FS_ERR("Input stream was accepted. Source: %s", fuuid2str(&msg->source, str, sizeof str));
 
-            FMSG(stream_accept, accept, pfactory->uuid, msg->source,
-                msg->stream_id
-            );
-            if (fmsgbus_publish(pfactory->msgbus, FSTREAM_ACCEPT, (fmsg_t const *)&accept) != FSUCCESS)
-                FS_ERR("Unable to publish accept message");
+                FMSG(stream_accept, accept, pfactory->uuid, msg->source,
+                    msg->stream_id
+                );
+                if (fmsgbus_publish(pfactory->msgbus, FSTREAM_ACCEPT, (fmsg_t const *)&accept) != FSUCCESS)
+                    FS_ERR("Unable to publish accept message");
 
-            return FSUCCESS;
+                return FSUCCESS;
+            }
+
+            break;
         }
     }
 

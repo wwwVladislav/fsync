@@ -341,13 +341,30 @@ FTEST_END()
 // sync_engine test
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+static fsync_listener_t* fsync_listener_retain(fsync_listener_t *plistener)
+{
+    return plistener;
+}
+
+static void fsync_listener_release(fsync_listener_t *plistener)
+{
+    (void)plistener;
+}
+
+static bool fsync_listener_accept(fsync_listener_t *plistener, binn *metainf)
+{
+    (void)plistener;
+    (void)metainf;
+    return true;
+}
+
 FTEST_START(fsync_engine)
 {
     ferr_t rc;
 
     fmem_iostream_t *src_stream = fmem_iostream(256);                                       assert(src_stream);
     fostream_t      *src_ostream = fmem_ostream(src_stream);                                assert(src_ostream);
-    size_t wsize = src_ostream->write(src_ostream, FDATA, sizeof FDATA);                    assert(wsize == sizeof FDATA);
+    size_t           wsize = src_ostream->write(src_ostream, FDATA, sizeof FDATA);          assert(wsize == sizeof FDATA);
     src_ostream->release(src_ostream);
 
     fistream_t      *src_istream = fmem_istream(src_stream);                                assert(src_istream);
@@ -359,10 +376,18 @@ FTEST_START(fsync_engine)
     fsync_engine_t *psync_engine = fsync_engine(msgbus, &uuid);                             assert(psync_engine);
     if (psync_engine)
     {
+        fsync_listener_t listener =
+        {
+            42,
+            fsync_listener_retain,
+            fsync_listener_release,
+            fsync_listener_accept
+        };
+        rc = fsync_engine_register_listener(psync_engine, &listener);                       assert(rc == FSUCCESS);
         rc = fsync_engine_sync(psync_engine, &uuid, 42, 0, src_istream);                    assert(rc == FSUCCESS);
 
-        static struct timespec const F10_SEC = { 10, 0 };
-        nanosleep(&F10_SEC, NULL);
+        static struct timespec const F60_SEC = { 60, 0 };
+        nanosleep(&F60_SEC, NULL);
 
         // TODO
         fsync_engine_release(psync_engine);

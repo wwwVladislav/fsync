@@ -29,7 +29,9 @@ typedef enum
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // Synchronization
     FSYNC_REQUEST,                  // sync_request
-    FSYNC_FAILED                    // sync_failed
+    FSYNC_FAILED,                   // sync_failed
+    FSYNC_CANCEL,                   // sync_cancel
+    FSYNC_START,                    // sync_start
 } fmessage_t;
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -130,6 +132,16 @@ FMSG_DEF(sync_failed,
     uint32_t                sync_id;                        // synchronization id
     uint32_t                err;                            // error code
     char                    msg[FMAX_ERROR_MSG_LEN];        // error message
+)
+
+FMSG_DEF(sync_cancel,
+    uint32_t                sync_id;                        // synchronization id
+    uint32_t                err;                            // error code
+    char                    msg[FMAX_ERROR_MSG_LEN];        // error message
+)
+
+FMSG_DEF(sync_start,
+    uint32_t                sync_id;                        // synchronization id
 )
 
 #endif

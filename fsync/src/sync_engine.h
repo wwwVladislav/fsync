@@ -12,7 +12,7 @@ typedef struct fsync_listener fsync_listener_t;
 
 typedef fsync_listener_t* (*fsync_listener_retain_fn_t) (fsync_listener_t *);
 typedef void              (*fsync_listener_release_fn_t)(fsync_listener_t *);
-typedef bool              (*fsync_listener_accept_fn_t) (fsync_listener_t *);
+typedef bool              (*fsync_listener_accept_fn_t) (fsync_listener_t *, binn *metainf);
 
 struct fsync_listener
 {

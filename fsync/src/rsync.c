@@ -27,20 +27,24 @@ static ferr_t frsync_iojob_do(frsync_iojob_t *io_job, fistream_t *pistream, fost
 {
     uint32_t rsize = 0;
 
+    rs_result result;
+
     do
     {
         size_t const read_size = sizeof io_job->in_buf - io_job->in_size;
         rsize = pistream->read(pistream, io_job->in_buf + io_job->in_size, read_size);
         io_job->in_size += rsize;
 
+        fstream_status_t istream_status = pistream->status(pistream);
+
         rs_buffers_t buf = { 0 };
         buf.next_in = io_job->in_buf;
         buf.avail_in = io_job->in_size;
-        buf.eof_in = rsize < read_size || rsize == 0;
+        buf.eof_in = istream_status == FSTREAM_STATUS_EOF || (istream_status != FSTREAM_STATUS_OK && rsize < read_size);
         buf.next_out = io_job->out_buf;
         buf.avail_out = sizeof io_job->out_buf;
 
-        rs_result result = rs_job_iter(io_job->job, &buf);
+        result = rs_job_iter(io_job->job, &buf);
 
         if (result != RS_INPUT_ENDED
             && result != RS_BLOCKED
@@ -60,7 +64,7 @@ static ferr_t frsync_iojob_do(frsync_iojob_t *io_job, fistream_t *pistream, fost
             memmove(io_job->in_buf, io_job->in_buf + io_job->in_size - buf.avail_in, buf.avail_in);
         io_job->in_size = buf.avail_in;
     }
-    while (rsize);
+    while (result == RS_BLOCKED || result == RS_INPUT_ENDED);
 
     return FSUCCESS;
 }
@@ -85,7 +89,7 @@ static ferr_t frsync_ijob_do(frsync_ijob_t *i_job, fistream_t *pistream)
         rs_buffers_t buf = { 0 };
         buf.next_in = i_job->in_buf;
         buf.avail_in = i_job->in_size;
-        buf.eof_in = rsize < read_size || rsize == 0;
+        buf.eof_in = rsize < read_size && pistream->status(pistream) != FSTREAM_STATUS_OK;
 
         rs_result result = rs_job_iter(i_job->job, &buf);
 
@@ -168,6 +172,12 @@ ferr_t frsync_signature_calculate(frsync_signature_calculator_t *psig, fistream_
     {
         FS_ERR("Invalid arguments");
         return FERR_INVALID_ARG;
+    }
+
+    if (!pbase_stream->seek(pbase_stream, 0))
+    {
+        FS_ERR("Base stream seek failed");
+        return FFAIL;
     }
 
     return frsync_iojob_do(&psig->io_job, pbase_stream, psignature_ostream);
@@ -369,6 +379,13 @@ frsync_delta_t *frsync_delta_create(fistream_t *pbase_stream)
 
     pdelta->ref_counter = 1;
     pdelta->pbase_stream = pbase_stream->retain(pbase_stream);
+
+    if (!pbase_stream->seek(pbase_stream, 0))
+    {
+        FS_ERR("Base stream seek failed");
+        frsync_delta_release(pdelta);
+        return 0;
+    }
 
     pdelta->io_job.job = rs_patch_begin(frsync_copy_cb, pbase_stream);
 

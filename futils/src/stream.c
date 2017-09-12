@@ -94,14 +94,14 @@ static size_t fmem_iostream_write(fmem_iostream_t *piostream, char const *data, 
             if (!block)
             {
                 FS_ERR("Memory block allocation failed");
-                return 0;
+                return written_size;
             }
 
             if (!fvector_push_back(&piostream->blocks, &block))
             {
                 FS_ERR("Unable to push memory block to vector");
                 free(block);
-                return 0;
+                return written_size;
             }
 
             last_block_offset = 0;
@@ -239,6 +239,7 @@ fostream_t *fmem_ostream(fmem_iostream_t *piostream)
         FS_ERR("Unable to allocate memory for ostream");
         return 0;
     }
+    memset(postream, 0, sizeof *postream);
 
     postream->ostream.retain = fmem_ostream_retain;
     postream->ostream.release = fmem_ostream_release;
@@ -323,6 +324,7 @@ fistream_t *fmem_istream(fmem_iostream_t *piostream)
         FS_ERR("Unable to allocate memory for istream");
         return 0;
     }
+    memset(pistream, 0, sizeof *pistream);
 
     pistream->istream.retain = fmem_istream_retain;
     pistream->istream.release = fmem_istream_release;
@@ -331,6 +333,112 @@ fistream_t *fmem_istream(fmem_iostream_t *piostream)
     pistream->istream.status = fmem_istream_status;
     pistream->ref_counter = 1;
     pistream->piostream = fmem_iostream_retain(piostream);
+
+    return (fistream_t *)pistream;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// mem_const_istream
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+typedef struct
+{
+    fistream_t          istream;
+    volatile uint32_t   ref_counter;
+    size_t              offset;
+    size_t              size;
+    char                data[1];
+} fmem_const_istream_t;
+
+static fistream_t* fmem_const_istream_retain(fistream_t *pistream)
+{
+    if (pistream)
+    {
+        fmem_const_istream_t *pmem_istream = (fmem_const_istream_t *)pistream;
+        pmem_istream->ref_counter++;
+    }
+    else
+        FS_ERR("Invalid istream");
+    return pistream;
+}
+
+static void fmem_const_istream_release(fistream_t *pistream)
+{
+    if (pistream)
+    {
+        fmem_const_istream_t *pmem_istream = (fmem_const_istream_t *)pistream;
+        if (!pmem_istream->ref_counter)
+            FS_ERR("Invalid istream");
+        else if (!--pmem_istream->ref_counter)
+        {
+            memset(pmem_istream, 0, sizeof *pmem_istream);
+            free(pmem_istream);
+        }
+    }
+    else
+        FS_ERR("Invalid istream");
+}
+
+static size_t fmem_const_istream_read(fistream_t *pistream, char *data, size_t size)
+{
+    if (!pistream)
+    {
+        FS_ERR("Invalid istream");
+        return 0;
+    }
+    fmem_const_istream_t *pmem_istream = (fmem_const_istream_t *)pistream;
+
+    size_t const available_size = pmem_istream->size - pmem_istream->offset;
+    if(!available_size)
+        return 0;
+
+    if (size > available_size)
+        size = available_size;
+
+    memcpy(data, pmem_istream->data + pmem_istream->offset, size);
+    pmem_istream->offset += size;
+
+    return size;
+}
+
+static bool fmem_const_istream_seek(fistream_t *pistream, size_t pos)
+{
+    if (!pistream)
+    {
+        FS_ERR("Invalid istream");
+        return false;
+    }
+    fmem_const_istream_t *pmem_istream = (fmem_const_istream_t *)pistream;
+    pmem_istream->offset = pos > pmem_istream->size ? pmem_istream->size : pos;
+    return true;
+}
+
+static fstream_status_t fmem_const_istream_status(fistream_t *pistream)
+{
+    fmem_const_istream_t *pmem_istream = (fmem_const_istream_t *)pistream;
+    return pmem_istream->offset < pmem_istream->size ? FSTREAM_STATUS_OK : FSTREAM_STATUS_EOF;
+}
+
+fistream_t *fmem_const_istream(char const *data, size_t size)
+{
+    fmem_const_istream_t *pistream = malloc(sizeof(fmem_const_istream_t) + size);
+    if (!pistream)
+    {
+        FS_ERR("Unable to allocate memory for istream");
+        return 0;
+    }
+    memset(pistream, 0, sizeof *pistream);
+
+    pistream->istream.retain = fmem_const_istream_retain;
+    pistream->istream.release = fmem_const_istream_release;
+    pistream->istream.read = fmem_const_istream_read;
+    pistream->istream.seek = fmem_const_istream_seek;
+    pistream->istream.status = fmem_const_istream_status;
+
+    pistream->ref_counter = 1;
+    pistream->size = size;
+    pistream->offset = 0;
+    memcpy(pistream->data, data, size);
 
     return (fistream_t *)pistream;
 }

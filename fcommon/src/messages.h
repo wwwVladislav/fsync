@@ -30,8 +30,7 @@ typedef enum
     // Synchronization
     FSYNC_REQUEST,                  // sync_request
     FSYNC_FAILED,                   // sync_failed
-    FSYNC_CANCEL,                   // sync_cancel
-    FSYNC_START,                    // sync_start
+    FSYNC_CANCEL                   // sync_cancel
 } fmessage_t;
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -121,14 +120,13 @@ FMSG_DEF(stream_data,
 // Synchronization
 
 FMSG_DEF(sync_request,
-    uint32_t                listener_id;                    // synchronization listener id
+    uint32_t                agent_id;                       // synchronization agent id
     uint32_t                sync_id;                        // synchronization id
     uint32_t                metainf_size;                   // meta information size
     uint8_t                 metainf[FMAX_METAINF_SIZE];     // meta information
 )
 
 FMSG_DEF(sync_failed,
-    uint32_t                listener_id;                    // synchronization listener id
     uint32_t                sync_id;                        // synchronization id
     uint32_t                err;                            // error code
     char                    msg[FMAX_ERROR_MSG_LEN];        // error message
@@ -138,10 +136,6 @@ FMSG_DEF(sync_cancel,
     uint32_t                sync_id;                        // synchronization id
     uint32_t                err;                            // error code
     char                    msg[FMAX_ERROR_MSG_LEN];        // error message
-)
-
-FMSG_DEF(sync_start,
-    uint32_t                sync_id;                        // synchronization id
 )
 
 #endif

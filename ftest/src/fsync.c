@@ -15,37 +15,6 @@
 
 typedef struct
 {
-    fistream_t  stream;
-    size_t      size;
-    size_t      offset;
-    uint8_t     data[64 * 1024];
-} fdata_istream_t;
-
-static fistream_t* frsync_istream_retain(fistream_t *p) { return p; }
-static void        frsync_istream_release(fistream_t *p) { (void)p; }
-
-static bool frsync_istream_seek(fistream_t *stream, size_t offset)
-{
-    fdata_istream_t *pstream = (fdata_istream_t *)stream;
-    pstream->offset = offset;
-    return true;
-}
-
-static size_t frsync_istream_read(fistream_t *stream, char *data, size_t size)
-{
-    fdata_istream_t *pstream = (fdata_istream_t *)stream;
-
-    size_t available_size = pstream->size - pstream->offset;
-    size_t read_size = available_size < size ? available_size : size;
-
-    memcpy(data, pstream->data + pstream->offset, read_size);
-    pstream->offset += read_size;
-
-    return read_size;
-}
-
-typedef struct
-{
     fostream_t  stream;
     size_t      size;
     size_t      offset;
@@ -120,34 +89,9 @@ FTEST_START(frsync_algorithm)
 {
     ferr_t rc;
 
-    fdata_istream_t base_data_stream =
-    {
-        {
-            frsync_istream_retain,
-            frsync_istream_release,
-            frsync_istream_read,
-            frsync_istream_seek
-        },
-        sizeof FBASE_DATA,
-        0,
-        { 0 }
-    };
-    memcpy(base_data_stream.data, FBASE_DATA, sizeof FBASE_DATA);
-
-    fdata_istream_t data_stream =
-    {
-        {
-            frsync_istream_retain,
-            frsync_istream_release,
-            frsync_istream_read,
-            frsync_istream_seek
-        },
-        sizeof FDATA,
-        0,
-        { 0 }
-    };
-    memcpy(data_stream.data, FDATA, sizeof FDATA);
-
+    fistream_t *base_data_stream = fmem_const_istream(FBASE_DATA, sizeof FBASE_DATA);
+    fistream_t *data_stream = fmem_const_istream(FDATA, sizeof FDATA);
+    
     fdata_ostream_t new_data_ostream =
     {
         {
@@ -177,7 +121,7 @@ FTEST_START(frsync_algorithm)
     if (psig_calc)
     {
         rc = frsync_signature_calculate(psig_calc,
-                                        (fistream_t*)&base_data_stream,
+                                        base_data_stream,
                                         (fostream_t*)&signature_ostream);               assert(rc == FSUCCESS);
         frsync_signature_calculator_release(psig_calc);
     }
@@ -195,24 +139,12 @@ FTEST_START(frsync_algorithm)
     };
 
     // Signature load
-    fdata_istream_t signature_istream =
-    {
-        {
-            frsync_istream_retain,
-            frsync_istream_release,
-            frsync_istream_read,
-            frsync_istream_seek
-        },
-        signature_ostream.size,
-        0,
-        { 0 }
-    };
-    memcpy(signature_istream.data, signature_ostream.data, signature_ostream.size);
+    fistream_t *signature_istream = fmem_const_istream((char const *)signature_ostream.data, signature_ostream.size);
 
     frsync_signature_t *psig = frsync_signature_create();                               assert(psig);
     if (psig)
     {
-        rc = frsync_signature_load(psig, (fistream_t*)&signature_istream);              assert(rc == FSUCCESS);
+        rc = frsync_signature_load(psig, signature_istream);                            assert(rc == FSUCCESS);
         if (rc == FSUCCESS)
         {
             // Delta calculation
@@ -220,34 +152,24 @@ FTEST_START(frsync_algorithm)
             if (pdelta_calc)
             {
                 rc = frsync_delta_calculate(pdelta_calc,
-                                            (fistream_t*)&data_stream,
+                                            data_stream,
                                             (fostream_t*)&delta_ostream);               assert(rc == FSUCCESS);
                 if (rc == FSUCCESS)
                 {
-                    fdata_istream_t delta_istream =
-                    {
-                        {
-                            frsync_istream_retain,
-                            frsync_istream_release,
-                            frsync_istream_read,
-                            frsync_istream_seek
-                        },
-                        delta_ostream.size,
-                        0,
-                        { 0 }
-                    };
-                    memcpy(delta_istream.data, delta_ostream.data, delta_ostream.size);
+                    fistream_t *delta_istream = fmem_const_istream((char const *)delta_ostream.data, delta_ostream.size);
 
                     // Delta apply
-                    base_data_stream.stream.seek(&base_data_stream.stream, 0);
-                    frsync_delta_t *pdelta = frsync_delta_create((fistream_t*)&base_data_stream);
+                    base_data_stream->seek(base_data_stream, 0);
+                    frsync_delta_t *pdelta = frsync_delta_create(base_data_stream);
                     if (pdelta)                                                         assert(pdelta);
                     {
                         rc = frsync_delta_apply(pdelta,
-                                                (fistream_t *)&delta_istream,
+                                                delta_istream,
                                                 (fostream_t *)&new_data_ostream);       assert(rc == FSUCCESS);
                         frsync_delta_release(pdelta);
                     }
+
+                    delta_istream->release(delta_istream);
                 }
                 frsync_delta_calculator_release(pdelta_calc);
             }
@@ -255,8 +177,12 @@ FTEST_START(frsync_algorithm)
         frsync_signature_release(psig);
     }
 
-    assert(new_data_ostream.size == data_stream.size);
-    assert(memcmp(new_data_ostream.data, data_stream.data, data_stream.size) == 0);
+    signature_istream->release(signature_istream);
+    data_stream->release(data_stream);
+    base_data_stream->release(base_data_stream);
+
+    assert(new_data_ostream.size == sizeof FDATA);
+    assert(memcmp(new_data_ostream.data, FDATA, sizeof FDATA) == 0);
 }
 FTEST_END()
 
@@ -267,7 +193,7 @@ FTEST_END()
 static fistream_t *pistream = 0;
 static fostream_t *postream = 0;
 
-static void fristream_listener(void *ptr, fistream_t *pstream, frstream_info_t const *info)
+static void fristream_agent(void *ptr, fistream_t *pstream, frstream_info_t const *info)
 {
     pistream = pstream->retain(pstream);
 }
@@ -285,7 +211,7 @@ FTEST_START(frstream)
 
     if (rstream_factory)
     {
-        rc = frstream_factory_istream_subscribe(rstream_factory, fristream_listener, 0);    assert(rc == FSUCCESS);
+        rc = frstream_factory_istream_subscribe(rstream_factory, fristream_agent, 0);       assert(rc == FSUCCESS);
         postream = frstream_factory_stream(rstream_factory, &uuid, 0);                      assert(postream != 0);
 
         while (!postream || !pistream)
@@ -300,7 +226,7 @@ FTEST_START(frstream)
         size_t read_size = pistream->read(pistream, tmp, sizeof tmp);                       assert(read_size == sizeof tmp);
         assert(memcmp(FDATA, tmp, sizeof FDATA) == 0);
 
-        rc = frstream_factory_istream_unsubscribe(rstream_factory, fristream_listener);     assert(rc == FSUCCESS);
+        rc = frstream_factory_istream_unsubscribe(rstream_factory, fristream_agent);        assert(rc == FSUCCESS);
         if (pistream) pistream->release(pistream);
         if (postream) postream->release(postream);
         frstream_factory_release(rstream_factory);
@@ -322,14 +248,11 @@ FTEST_START(frstream_fail)
 
     if (rstream_factory)
     {
-        fostream_t *pstream = frstream_factory_stream(rstream_factory, &uuid, 0);           assert(postream != 0);
+        fostream_t *pstream = frstream_factory_stream(rstream_factory, &uuid, 0);           assert(pstream == 0);
 
         static struct timespec const F1_SEC = { 1, 0 };
         nanosleep(&F1_SEC, NULL);
 
-        fstream_status_t status = pstream->status(pstream);                                 assert(status == FSTREAM_STATUS_CLOSED);
-
-        if (pstream) pstream->release(pstream);
         frstream_factory_release(rstream_factory);
     }
 
@@ -341,20 +264,31 @@ FTEST_END()
 // sync_engine test
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-static fsync_listener_t* fsync_listener_retain(fsync_listener_t *plistener)
+static fsync_agent_t* fsync_agent_retain(fsync_agent_t *pagent)
 {
-    return plistener;
+    return pagent;
 }
 
-static void fsync_listener_release(fsync_listener_t *plistener)
+static void fsync_agent_release(fsync_agent_t *pagent)
 {
-    (void)plistener;
+    (void)pagent;
 }
 
-static bool fsync_listener_accept(fsync_listener_t *plistener, binn *metainf)
+static fostream_t *dst_ostream = 0;
+
+static bool fsync_agent_accept(fsync_agent_t *pagent, binn *metainf, fistream_t **pistream, fostream_t **postream)
 {
-    (void)plistener;
+    (void)pagent;
     (void)metainf;
+
+    // dst_istream
+    *pistream = fmem_const_istream(FBASE_DATA, sizeof FBASE_DATA);                          assert(*pistream);
+
+    // dst_ostream
+    fmem_iostream_t *pstream = fmem_iostream(256);                                          assert(pstream);
+    *postream = dst_ostream = fmem_ostream(pstream);                                        assert(dst_ostream);
+    fmem_iostream_release(pstream);
+
     return true;
 }
 
@@ -362,12 +296,7 @@ FTEST_START(fsync_engine)
 {
     ferr_t rc;
 
-    fmem_iostream_t *src_stream = fmem_iostream(256);                                       assert(src_stream);
-    fostream_t      *src_ostream = fmem_ostream(src_stream);                                assert(src_ostream);
-    size_t           wsize = src_ostream->write(src_ostream, FDATA, sizeof FDATA);          assert(wsize == sizeof FDATA);
-    src_ostream->release(src_ostream);
-
-    fistream_t      *src_istream = fmem_istream(src_stream);                                assert(src_istream);
+    fistream_t *src_istream = fmem_const_istream(FDATA, sizeof FDATA);                      assert(src_istream);
 
     fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
@@ -376,25 +305,24 @@ FTEST_START(fsync_engine)
     fsync_engine_t *psync_engine = fsync_engine(msgbus, &uuid);                             assert(psync_engine);
     if (psync_engine)
     {
-        fsync_listener_t listener =
+        fsync_agent_t agent =
         {
             42,
-            fsync_listener_retain,
-            fsync_listener_release,
-            fsync_listener_accept
+            fsync_agent_retain,
+            fsync_agent_release,
+            fsync_agent_accept
         };
-        rc = fsync_engine_register_listener(psync_engine, &listener);                       assert(rc == FSUCCESS);
+        rc = fsync_engine_register_agent(psync_engine, &agent);                             assert(rc == FSUCCESS);
         rc = fsync_engine_sync(psync_engine, &uuid, 42, 0, src_istream);                    assert(rc == FSUCCESS);
 
-        //static struct timespec const F60_SEC = { 60, 0 };
-        //nanosleep(&F60_SEC, NULL);
+        static struct timespec const F60_SEC = { 60, 0 };
+        nanosleep(&F60_SEC, NULL);
 
         // TODO
         fsync_engine_release(psync_engine);
     }
 
     fmsgbus_release(msgbus);
-    fmem_iostream_release(src_stream);
     src_istream->release(src_istream);
 }
 FTEST_END()

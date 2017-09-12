@@ -6,6 +6,7 @@
 typedef enum
 {
     FSTREAM_STATUS_OK = 0,
+    FSTREAM_STATUS_EOF,
     FSTREAM_STATUS_INIT,
     FSTREAM_STATUS_CLOSED,
     FSTREAM_STATUS_INVALID
@@ -56,5 +57,7 @@ fmem_iostream_t *fmem_iostream_retain   (fmem_iostream_t *piostream);
 void             fmem_iostream_release  (fmem_iostream_t *piostream);
 fistream_t      *fmem_istream           (fmem_iostream_t *piostream);
 fostream_t      *fmem_ostream           (fmem_iostream_t *piostream);
+
+fistream_t      *fmem_const_istream     (char const *data, size_t size);
 
 #endif

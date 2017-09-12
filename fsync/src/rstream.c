@@ -95,6 +95,7 @@ void fristream_reject_handler(fristream_t *pstream, FMSG_TYPE(stream_reject) con
         || memcmp(&msg->hdr.src, &pstream->src, sizeof pstream->src) != 0)
         return;
     pstream->status = FSTREAM_STATUS_CLOSED;
+    sem_post(&pstream->pin_sem);
 }
 
 void fristream_failed_handler(fristream_t *pstream, FMSG_TYPE(stream_failed) const *msg)
@@ -103,6 +104,7 @@ void fristream_failed_handler(fristream_t *pstream, FMSG_TYPE(stream_failed) con
         || memcmp(&msg->hdr.src, &pstream->src, sizeof pstream->src) != 0)
         return;
     pstream->status = FSTREAM_STATUS_INVALID;
+    sem_post(&pstream->pin_sem);
 }
 
 void fristream_closed_handler(fristream_t *pstream, FMSG_TYPE(stream_closed) const *msg)
@@ -111,6 +113,7 @@ void fristream_closed_handler(fristream_t *pstream, FMSG_TYPE(stream_closed) con
         || memcmp(&msg->hdr.src, &pstream->src, sizeof pstream->src) != 0)
         return;
     pstream->status = FSTREAM_STATUS_CLOSED;
+    sem_post(&pstream->pin_sem);
 }
 
 void fristream_node_disconnected_handler(fristream_t *pstream, FMSG_TYPE(node_disconnected) const *msg)
@@ -118,6 +121,7 @@ void fristream_node_disconnected_handler(fristream_t *pstream, FMSG_TYPE(node_di
     if (memcmp(&msg->hdr.src, &pstream->src, sizeof pstream->src) != 0)
         return;
     pstream->status = FSTREAM_STATUS_CLOSED;
+    sem_post(&pstream->pin_sem);
 }
 
 static void fristream_msgbus_retain(fristream_t *pstream, fmsgbus_t *pmsgbus)
@@ -260,24 +264,27 @@ static size_t fristream_read(fristream_t *pstream, char *data, size_t size)
         return 0;
     }
 
-    if (pstream->status != FSTREAM_STATUS_OK)
-    {
-        FS_WARN("Istream is closed");
-        return 0;
-    }
-
     if (!data || !size)
         return 0;
 
     size_t read_size = 0;
     while (read_size < size)
     {
-        while (sem_wait(&pstream->pin_sem) == -1 && errno == EINTR)
+        while (pstream->status == FSTREAM_STATUS_OK
+               && sem_wait(&pstream->pin_sem) == -1
+               && errno == EINTR)
             continue;       // Restart if interrupted by handler
 
+        size_t rsize;
         fpush_lock(pstream->mutex);
-        read_size += pstream->pin->read(pstream->pin, data + read_size, size - read_size);
+        rsize = pstream->pin->read(pstream->pin, data + read_size, size - read_size);
         fpop_lock();
+
+        read_size += rsize;
+
+        if (pstream->status != FSTREAM_STATUS_OK
+            && read_size < size)
+            break;
     }
 
     pstream->read_size += read_size;
@@ -305,6 +312,7 @@ typedef struct
     fostream_t                  ostream;        // base ostream structure
     volatile uint32_t           ref_counter;    // References counter
     volatile fstream_status_t   status;         // status
+    sem_t                       sem;            // Semaphore for status wait
     uint32_t                    id;             // stream id
     volatile uint64_t           written_size;   // written size
     fuuid_t                     src;            // source address
@@ -324,6 +332,7 @@ void frostream_accept_handler(frostream_t *pstream, FMSG_TYPE(stream_accept) con
         || memcmp(&msg->hdr.src, &pstream->dst, sizeof pstream->dst) != 0)
         return;
     pstream->status = FSTREAM_STATUS_OK;
+    sem_post(&pstream->sem);
 }
 
 void frostream_reject_handler(frostream_t *pstream, FMSG_TYPE(stream_reject) const *msg)
@@ -332,6 +341,7 @@ void frostream_reject_handler(frostream_t *pstream, FMSG_TYPE(stream_reject) con
         || memcmp(&msg->hdr.src, &pstream->dst, sizeof pstream->dst) != 0)
         return;
     pstream->status = FSTREAM_STATUS_CLOSED;
+    sem_post(&pstream->sem);
 }
 
 void frostream_failed_handler(frostream_t *pstream, FMSG_TYPE(stream_failed) const *msg)
@@ -340,6 +350,7 @@ void frostream_failed_handler(frostream_t *pstream, FMSG_TYPE(stream_failed) con
         || memcmp(&msg->hdr.src, &pstream->dst, sizeof pstream->dst) != 0)
         return;
     pstream->status = FSTREAM_STATUS_INVALID;
+    sem_post(&pstream->sem);
 }
 
 void frostream_closed_handler(frostream_t *pstream, FMSG_TYPE(stream_closed) const *msg)
@@ -348,6 +359,7 @@ void frostream_closed_handler(frostream_t *pstream, FMSG_TYPE(stream_closed) con
         || memcmp(&msg->hdr.src, &pstream->dst, sizeof pstream->dst) != 0)
         return;
     pstream->status = FSTREAM_STATUS_CLOSED;
+    sem_post(&pstream->sem);
 }
 
 void frostream_node_disconnected_handler(frostream_t *pstream, FMSG_TYPE(node_disconnected) const *msg)
@@ -355,6 +367,7 @@ void frostream_node_disconnected_handler(frostream_t *pstream, FMSG_TYPE(node_di
     if (memcmp(&msg->hdr.src, &pstream->dst, sizeof pstream->dst) != 0)
         return;
     pstream->status = FSTREAM_STATUS_CLOSED;
+    sem_post(&pstream->sem);
 }
 
 static void frostream_msgbus_retain(frostream_t *pstream, fmsgbus_t *pmsgbus)
@@ -398,6 +411,14 @@ static frostream_t *frostream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src
     pstream->id = id;
     pstream->src = *src;
     pstream->dst = *dst;
+
+    if (sem_init(&pstream->sem, 0, 0) == -1)
+    {
+        FS_ERR("The semaphore initialization is failed");
+        frostream_release(pstream);
+        return 0;
+    }
+
     frostream_msgbus_retain(pstream, msgbus);
 
     return pstream;
@@ -423,6 +444,7 @@ static bool frostream_release(frostream_t *pstream)
             frostream_close(pstream);
             if (pstream->msgbus)
                 frostream_msgbus_release(pstream);
+            sem_destroy(&pstream->sem);
             memset(pstream, 0, sizeof *pstream);
             free(pstream);
             return true;
@@ -436,6 +458,7 @@ static bool frostream_release(frostream_t *pstream)
 static void frostream_close(frostream_t *pstream)
 {
     pstream->status = FSTREAM_STATUS_CLOSED;
+    sem_post(&pstream->sem);
 
     if (pstream->msgbus)
     {
@@ -909,7 +932,16 @@ fostream_t *frstream_factory_stream(frstream_factory_t *pfactory, fuuid_t const 
     {
         FS_ERR("Stream request was failed");
         frostream_release(postream);
-        postream = 0;
+        return 0;
+    }
+
+    while (sem_wait(&postream->sem) == -1 && errno == EINTR)
+        continue;       // Restart if interrupted by handler
+
+    if(postream->status != FSTREAM_STATUS_OK)
+    {
+        frostream_release(postream);
+        return 0;
     }
 
     return (fostream_t *)postream;

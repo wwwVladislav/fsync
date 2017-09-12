@@ -892,9 +892,9 @@ static void fsync_dst_cancel(fsync_dst_threads_t *dst_threads, fuuid_t const *sr
         {
             dst_thread->sync.is_busy = false;
             sem_post(&dst_thread->sync.sem);
-            return true;
+            break;
         }
-    }    
+    }
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -23,7 +23,7 @@ struct fsync_agent
     fsync_agent_release_fn_t        release;
     fsync_agent_accept_fn_t         accept;
     fsync_error_handler_fn_t        failed;
-    fsync_completion_handler_fn_t   comple;
+    fsync_completion_handler_fn_t   complete;
 };
 
 fsync_engine_t *fsync_engine(fmsgbus_t *pmsgbus, fuuid_t const *uuid);

@@ -828,6 +828,10 @@ static void *fsync_dst_thread(void *param)
                 break;
             }
 
+            // VI. Complete the synchronization
+            if (agent->complete)
+                agent->complete(agent, dst.metainf);
+
             FS_INFO("Delta was successfully applied: %s", fuuid2str(&pengine->uuid, dst_str, sizeof dst_str));
         }
         while(0);
@@ -839,6 +843,9 @@ static void *fsync_dst_thread(void *param)
 
         if (psig_calc)
             frsync_signature_calculator_release(psig_calc);
+
+        if (ret != FSUCCESS && agent->failed)
+            agent->failed(agent, dst.metainf, ret, err_msg);
 
         if (agent)
             agent->release(agent);

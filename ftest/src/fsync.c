@@ -292,6 +292,12 @@ static bool fsync_agent_accept(fsync_agent_t *pagent, binn *metainf, fistream_t 
     return true;
 }
 
+static void fsync_agent_error_handler(fsync_agent_t *pagent, binn *metainf, ferr_t err, char const *err_msg)
+{}
+
+static void fsync_agent_completion_handler(fsync_agent_t *pagent, binn *metainf)
+{}
+
 FTEST_START(fsync_engine)
 {
     ferr_t rc;
@@ -310,7 +316,9 @@ FTEST_START(fsync_engine)
             42,
             fsync_agent_retain,
             fsync_agent_release,
-            fsync_agent_accept
+            fsync_agent_accept,
+            fsync_agent_error_handler,
+            fsync_agent_completion_handler
         };
         rc = fsync_engine_register_agent(psync_engine, &agent);                             assert(rc == FSUCCESS);
         rc = fsync_engine_sync(psync_engine, &uuid, 42, 0, src_istream);                    assert(rc == FSUCCESS);

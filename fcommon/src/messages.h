@@ -21,7 +21,6 @@ typedef enum
     // Remote streams
     FSTREAM,                        // stream
     FSTREAM_ACCEPT,                 // stream_accept
-    FSTREAM_REJECT,                 // stream_reject
     FSTREAM_FAILED,                 // stream_failed
     FSTREAM_CLOSED,                 // stream_closed
     FSTREAM_DATA,                   // stream_data
@@ -30,7 +29,8 @@ typedef enum
     // Synchronization
     FSYNC_REQUEST,                  // sync_request
     FSYNC_FAILED,                   // sync_failed
-    FSYNC_CANCEL                   // sync_cancel
+    FSYNC_CANCEL,                   // sync_cancel
+    FSYNC_OK,                       // sync_ok
 } fmessage_t;
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -95,10 +95,6 @@ FMSG_DEF(stream_accept,
     uint32_t                stream_id;                      // stream id
 )
 
-FMSG_DEF(stream_reject,
-    uint32_t                stream_id;                      // stream id
-)
-
 FMSG_DEF(stream_failed,
     uint32_t                stream_id;                      // stream id
     uint32_t                err;                            // error code
@@ -107,6 +103,7 @@ FMSG_DEF(stream_failed,
 
 FMSG_DEF(stream_closed,
     uint32_t                stream_id;                      // stream id
+    uint64_t                data_size;                      // total received/sent size
 )
 
 FMSG_DEF(stream_data,
@@ -136,6 +133,10 @@ FMSG_DEF(sync_cancel,
     uint32_t                sync_id;                        // synchronization id
     uint32_t                err;                            // error code
     char                    msg[FMAX_ERROR_MSG_LEN];        // error message
+)
+
+FMSG_DEF(sync_ok,
+    uint32_t                sync_id;                        // synchronization id
 )
 
 #endif

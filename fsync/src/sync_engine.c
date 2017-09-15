@@ -15,15 +15,16 @@
 #include <errno.h>
 
 /*
- *        synchronization
- *  src  ------- DATA ------------------------> dst
- *       -- FSYNC_REQUEST -------------------->         mandatory   FSYNC_STATE_INIT
- *      <-- signature istream/FSYNC_FAILED ---          mandatory
- *       -- FSYNC_CANCEL --------------------->         optional
- *      <-- [signature] ----------------------          mandatory
- *       -- delta istream -------------------->         mandatory
- *       ---- [delta] ------------------------> apply   mandatory
-*/
+ *               synchronization
+ *  src  ------------ DATA ------------------> dst
+ *       -- FSYNC_REQUEST ------------------->          mandatory
+ *      <-- signature istream/FSYNC_FAILED --           mandatory
+ *       -- FSYNC_CANCEL -------------------->          optional
+ *      <-- [signature] ---------------------           mandatory
+ *       -- delta istream ------------------->          mandatory
+ *       -- [delta] -------------------------> apply    mandatory
+ *      <-- FSYNC_OK/FSYNC_FAILED -----------           mandatory
+ */
 
 // src
 typedef struct
@@ -63,6 +64,7 @@ typedef struct
     fsync_thread_t          sync;                               // synchronization thread status
     volatile uint32_t       sync_id;                            // synchronization id
     fistream_t             *signature_istream;                  // signature istream
+    ferr_t                  err;                                // error
 } fsync_src_thread_t;
 
 typedef struct
@@ -71,6 +73,7 @@ typedef struct
     uint32_t                sync_id;                            // synchronization id
     fuuid_t                 src;                                // source uuid
     fistream_t             *delta_istream;                      // delta istream
+    ferr_t                  err;                                // error
 } fsync_dst_thread_t;
 
 typedef struct
@@ -121,6 +124,17 @@ typedef struct
     uint32_t        sync_id;
     fsync_stream_t  stream_type;
 } fsync_stream_metainf_t;
+
+#define FSYNC_CHECK_CANCEL_SATATE()                 \
+    if (!thread->sync.is_active)                    \
+        break;                                      \
+                                                    \
+    if (!thread->sync.is_busy)                      \
+    {                                               \
+        ret = thread->err;                          \
+        err_msg = "Synchronization was canceled";   \
+        break;                                      \
+    }
 
 static binn *fsync_signature_stream_metainf(uint32_t sync_id)
 {
@@ -292,6 +306,7 @@ static bool fsync_src_create(fsync_engine_t *pengine, fsync_src_threads_t *src_t
         fsync_src_thread_t *sync_thread = src_threads->threads + i;
         sync_thread->sync.is_active = false;
         sync_thread->sync.is_busy = false;
+        sync_thread->err = FSUCCESS;
 
         if (sem_init(&sync_thread->sync.sem, 0, 0) == -1)
         {
@@ -410,8 +425,8 @@ static void *fsync_src_thread(void *param)
             // II. Wait signature istream
             while (sem_wait(&thread->sync.sem) == -1 && errno == EINTR)
                 continue;       // Restart if interrupted by handler
-            if (!thread->sync.is_active || !thread->sync.is_busy)
-                break;
+
+            FSYNC_CHECK_CANCEL_SATATE();
 
             // III. Load signature
             psig = frsync_signature_create();
@@ -423,6 +438,8 @@ static void *fsync_src_thread(void *param)
                 break;
             }
 
+            FSYNC_CHECK_CANCEL_SATATE();
+
             ret = frsync_signature_load(psig, thread->signature_istream);
             if (ret != FSUCCESS)
             {
@@ -430,6 +447,8 @@ static void *fsync_src_thread(void *param)
                 FS_ERR(err_msg);
                 break;
             }
+
+            FSYNC_CHECK_CANCEL_SATATE();
 
             char str[2 * sizeof(fuuid_t) + 1] = { 0 };
             FS_INFO("Signature received: %s", fuuid2str(&pengine->uuid, str, sizeof str));
@@ -454,6 +473,8 @@ static void *fsync_src_thread(void *param)
                 break;
             }
 
+            FSYNC_CHECK_CANCEL_SATATE();
+
             // V. Calculate delta
             pdelta_calc = frsync_delta_calculator_create(psig);
             if (!pdelta_calc)
@@ -473,6 +494,34 @@ static void *fsync_src_thread(void *param)
                 FS_ERR(err_msg);
                 break;
             }
+
+            src.delta_ostream->release(src.delta_ostream);
+            src.delta_ostream = 0;
+            
+            FSYNC_CHECK_CANCEL_SATATE();
+
+            // VI. Wait completion
+            while (sem_wait(&thread->sync.sem) == -1 && errno == EINTR)
+                continue;       // Restart if interrupted by handler
+
+            char src_str[2 * sizeof(fuuid_t) + 1] = { 0 };
+            char dst_str[2 * sizeof(fuuid_t) + 1] = { 0 };
+            if (thread->err == FSUCCESS)
+            {
+                if (agent->complete)
+                    agent->complete(agent, src.metainf);
+                FS_INFO("Synchronization was successfully completed: src=%s, dst=%s",
+                        fuuid2str(&pengine->uuid, src_str, sizeof src_str),
+                        fuuid2str(&src.dst, dst_str, sizeof dst_str));
+            }
+            else
+            {
+                if (agent->failed)
+                    agent->failed(agent, src.metainf, thread->err, "Synchronization failed");
+                FS_INFO("Synchronization failed: src=%s, dst=%s",
+                        fuuid2str(&pengine->uuid, src_str, sizeof src_str),
+                        fuuid2str(&src.dst, dst_str, sizeof dst_str));
+            }
         }
         while(0);
 
@@ -487,6 +536,10 @@ static void *fsync_src_thread(void *param)
         }
         thread->sync_id = 0;
         thread->sync.is_busy = false;
+        thread->err = FSUCCESS;
+
+        if (ret != FSUCCESS && agent->failed)
+            agent->failed(agent, src.metainf, ret, err_msg);
 
         if (agent) agent->release(agent);
         fsync_src_free(&src);
@@ -525,14 +578,29 @@ static bool fsync_src_set_signature_istream(fsync_src_threads_t *src_threads, ui
     return false;
 }
 
-static void fsync_src_cancel(fsync_src_threads_t *src_threads, uint32_t sync_id)
+static void fsync_src_cancel(fsync_src_threads_t *src_threads, uint32_t sync_id, ferr_t err)
 {
     for(uint32_t i = 0; i < FARRAY_SIZE(src_threads->threads); ++i)
     {
         fsync_src_thread_t *src_thread = src_threads->threads + i;
         if (src_thread->sync_id == sync_id)
         {
+            src_thread->err = err;
             src_thread->sync.is_busy = false;
+            sem_post(&src_thread->sync.sem);
+            break;
+        }
+    }
+}
+
+static void fsync_src_ok(fsync_src_threads_t *src_threads, uint32_t sync_id)
+{
+    for(uint32_t i = 0; i < FARRAY_SIZE(src_threads->threads); ++i)
+    {
+        fsync_src_thread_t *src_thread = src_threads->threads + i;
+        if (src_thread->sync_id == sync_id)
+        {
+            src_thread->err = FSUCCESS;
             sem_post(&src_thread->sync.sem);
             break;
         }
@@ -632,6 +700,7 @@ static bool fsync_dst_create(fsync_engine_t *pengine, fsync_dst_threads_t *dst_t
         fsync_dst_thread_t *sync_thread = dst_threads->threads + i;
         sync_thread->sync.is_active = false;
         sync_thread->sync.is_busy = false;
+        sync_thread->err = FSUCCESS;
 
         if (sem_init(&sync_thread->sync.sem, 0, 0) == -1)
         {
@@ -700,6 +769,8 @@ static void *fsync_dst_thread(void *param)
     {
         while (sem_wait(&dst_threads->sem) == -1 && errno == EINTR)
             continue;       // Restart if interrupted by handler
+        if (!thread->sync.is_active)
+            break;
 
         fsync_dst_t                    dst = { 0 };
         fsync_agent_t                 *agent = 0;
@@ -750,6 +821,8 @@ static void *fsync_dst_thread(void *param)
                 break;
             }
 
+            FSYNC_CHECK_CANCEL_SATATE();
+
             // II. Request ostream for data signature
             binn *obj = fsync_signature_stream_metainf(dst.sync_id);
             if (!obj)
@@ -770,8 +843,7 @@ static void *fsync_dst_thread(void *param)
                 break;
             }
 
-            if (!thread->sync.is_active || !thread->sync.is_busy)
-                break;
+            FSYNC_CHECK_CANCEL_SATATE();
 
             // III. Signature calculation
             psig_calc = frsync_signature_calculator_create();
@@ -798,15 +870,13 @@ static void *fsync_dst_thread(void *param)
             dst.signature_ostream->release(dst.signature_ostream);
             dst.signature_ostream = 0;
 
-            if (!thread->sync.is_active || !thread->sync.is_busy)
-                break;
+            FSYNC_CHECK_CANCEL_SATATE();
 
             // IV. Wait delta istream
             while (sem_wait(&thread->sync.sem) == -1 && errno == EINTR)
                 continue;       // Restart if interrupted by handler
 
-            if (!thread->sync.is_active || !thread->sync.is_busy)
-                break;
+            FSYNC_CHECK_CANCEL_SATATE();
 
             // V. Delta apply
             pdelta = frsync_delta_create(dst.pistream);
@@ -832,6 +902,18 @@ static void *fsync_dst_thread(void *param)
             if (agent->complete)
                 agent->complete(agent, dst.metainf);
 
+            // V. Send notification to client
+            FMSG(sync_ok, ok, pengine->uuid, dst.src,
+                dst.sync_id
+            );
+            ret = fmsgbus_publish(pengine->msgbus, FSYNC_OK, (fmsg_t const *)&ok);
+            if (ret != FSUCCESS)
+            {
+                err_msg = "Synchronization completion event not published";
+                FS_ERR(err_msg);
+                break;
+            }
+
             FS_INFO("Delta was successfully applied: %s", fuuid2str(&pengine->uuid, dst_str, sizeof dst_str));
         }
         while(0);
@@ -853,6 +935,7 @@ static void *fsync_dst_thread(void *param)
         fsync_dst_free(&dst);
 
         thread->sync.is_busy = false;
+        thread->err = FSUCCESS;
 
         if (ret != FSUCCESS)
         {
@@ -889,7 +972,7 @@ static bool fsync_dst_set_delta_istream(fsync_dst_threads_t *dst_threads, fuuid_
     return false;
 }
 
-static void fsync_dst_cancel(fsync_dst_threads_t *dst_threads, fuuid_t const *src, uint32_t sync_id)
+static void fsync_dst_cancel(fsync_dst_threads_t *dst_threads, fuuid_t const *src, uint32_t sync_id, ferr_t err)
 {
     for(uint32_t i = 0; i < FARRAY_SIZE(dst_threads->threads); ++i)
     {
@@ -897,6 +980,7 @@ static void fsync_dst_cancel(fsync_dst_threads_t *dst_threads, fuuid_t const *sr
         if (dst_thread->sync_id == sync_id
             && memcmp(&dst_thread->src, src, sizeof *src) == 0)
         {
+            dst_thread->err = err;
             dst_thread->sync.is_busy = false;
             sem_post(&dst_thread->sync.sem);
             break;
@@ -941,7 +1025,7 @@ static void fsync_failure_handler(fsync_engine_t *pengine, FMSG_TYPE(sync_failed
 {
     if (memcmp(&msg->hdr.dst, &pengine->uuid, sizeof pengine->uuid) != 0)
         return;
-    fsync_src_cancel(&pengine->src_threads, msg->sync_id);
+    fsync_src_cancel(&pengine->src_threads, msg->sync_id, (ferr_t)msg->err);
     FS_ERR("Synchronization was failed. Reason: \'%s\'", msg->msg);
 }
 
@@ -950,8 +1034,17 @@ static void fsync_cancel_handler(fsync_engine_t *pengine, FMSG_TYPE(sync_cancel)
 {
     if (memcmp(&msg->hdr.dst, &pengine->uuid, sizeof pengine->uuid) != 0)
         return;
-    fsync_dst_cancel(&pengine->dst_threads, &msg->hdr.src, msg->sync_id);
+    fsync_dst_cancel(&pengine->dst_threads, &msg->hdr.src, msg->sync_id, msg->err);
     FS_ERR("Synchronization was canceled. Reason: \'%s\'", msg->msg);
+}
+
+// FSYNC_OK handler
+static void fsync_ok_handler(fsync_engine_t *pengine, FMSG_TYPE(sync_ok) const *msg)
+{
+    if (memcmp(&msg->hdr.dst, &pengine->uuid, sizeof pengine->uuid) != 0)
+        return;
+    fsync_src_ok(&pengine->src_threads, msg->sync_id);
+    FS_ERR("Synchronization ok");
 }
 
 static void fsync_engine_istream_listener(fsync_engine_t *pengine, fistream_t *pstream, frstream_info_t const *info)
@@ -1003,7 +1096,7 @@ static void fsync_engine_istream_listener(fsync_engine_t *pengine, fistream_t *p
     {
         if(metainf.stream_type == FSYNC_SIGNATURE_STREAM)
         {
-            fsync_src_cancel(&pengine->src_threads, sync_id);
+            fsync_src_cancel(&pengine->src_threads, sync_id, ret);
 
             FMSG(sync_cancel, err, pengine->uuid, info->peer,
                 metainf.sync_id,
@@ -1015,7 +1108,7 @@ static void fsync_engine_istream_listener(fsync_engine_t *pengine, fistream_t *p
         }
         else if(metainf.stream_type == FSYNC_DELTA_STREAM)
         {
-            fsync_dst_cancel(&pengine->dst_threads, &info->peer, metainf.sync_id);
+            fsync_dst_cancel(&pengine->dst_threads, &info->peer, metainf.sync_id, ret);
 
             FMSG(sync_failed, err, pengine->uuid, info->peer,
                 metainf.sync_id,
@@ -1036,6 +1129,7 @@ static void fsync_engine_msgbus_retain(fsync_engine_t *pengine, fmsgbus_t *pmsgb
     fmsgbus_subscribe(pengine->msgbus, FSYNC_REQUEST,   (fmsg_handler_t)fsync_request_handler,  pengine);
     fmsgbus_subscribe(pengine->msgbus, FSYNC_FAILED,    (fmsg_handler_t)fsync_failure_handler,  pengine);
     fmsgbus_subscribe(pengine->msgbus, FSYNC_CANCEL,    (fmsg_handler_t)fsync_cancel_handler,   pengine);
+    fmsgbus_subscribe(pengine->msgbus, FSYNC_OK,        (fmsg_handler_t)fsync_ok_handler,       pengine);
 }
 
 static void fsync_engine_msgbus_release(fsync_engine_t *pengine)
@@ -1045,6 +1139,7 @@ static void fsync_engine_msgbus_release(fsync_engine_t *pengine)
         fmsgbus_unsubscribe(pengine->msgbus, FSYNC_REQUEST, (fmsg_handler_t)fsync_request_handler);
         fmsgbus_unsubscribe(pengine->msgbus, FSYNC_FAILED,  (fmsg_handler_t)fsync_failure_handler);
         fmsgbus_unsubscribe(pengine->msgbus, FSYNC_CANCEL,  (fmsg_handler_t)fsync_cancel_handler);
+        fmsgbus_unsubscribe(pengine->msgbus, FSYNC_OK,      (fmsg_handler_t)fsync_ok_handler);
         fmsgbus_release(pengine->msgbus);
     }
 }

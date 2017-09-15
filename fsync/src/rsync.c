@@ -26,7 +26,6 @@ typedef struct
 static ferr_t frsync_iojob_do(frsync_iojob_t *io_job, fistream_t *pistream, fostream_t *postream)
 {
     uint32_t rsize = 0;
-
     rs_result result;
 
     do
@@ -40,14 +39,13 @@ static ferr_t frsync_iojob_do(frsync_iojob_t *io_job, fistream_t *pistream, fost
         rs_buffers_t buf = { 0 };
         buf.next_in = io_job->in_buf;
         buf.avail_in = io_job->in_size;
-        buf.eof_in = istream_status == FSTREAM_STATUS_EOF || (istream_status != FSTREAM_STATUS_OK && rsize < read_size);
+        buf.eof_in = istream_status == FSTREAM_STATUS_EOF;
         buf.next_out = io_job->out_buf;
         buf.avail_out = sizeof io_job->out_buf;
 
         result = rs_job_iter(io_job->job, &buf);
 
-        if (result != RS_INPUT_ENDED
-            && result != RS_BLOCKED
+        if (result != RS_BLOCKED
             && result != RS_DONE)
             return FFAIL;
 
@@ -64,7 +62,7 @@ static ferr_t frsync_iojob_do(frsync_iojob_t *io_job, fistream_t *pistream, fost
             memmove(io_job->in_buf, io_job->in_buf + io_job->in_size - buf.avail_in, buf.avail_in);
         io_job->in_size = buf.avail_in;
     }
-    while (result == RS_BLOCKED || result == RS_INPUT_ENDED);
+    while (result == RS_BLOCKED);
 
     return FSUCCESS;
 }
@@ -79,6 +77,7 @@ typedef struct
 static ferr_t frsync_ijob_do(frsync_ijob_t *i_job, fistream_t *pistream)
 {
     uint32_t rsize = 0;
+    rs_result result;
 
     do
     {
@@ -86,12 +85,14 @@ static ferr_t frsync_ijob_do(frsync_ijob_t *i_job, fistream_t *pistream)
         rsize = pistream->read(pistream, i_job->in_buf + i_job->in_size, read_size);
         i_job->in_size += rsize;
 
+        fstream_status_t istream_status = pistream->status(pistream);
+
         rs_buffers_t buf = { 0 };
         buf.next_in = i_job->in_buf;
         buf.avail_in = i_job->in_size;
-        buf.eof_in = rsize < read_size && pistream->status(pistream) != FSTREAM_STATUS_OK;
+        buf.eof_in = istream_status == FSTREAM_STATUS_EOF;
 
-        rs_result result = rs_job_iter(i_job->job, &buf);
+        result = rs_job_iter(i_job->job, &buf);
 
         if (result != RS_BLOCKED
             && result != RS_DONE)
@@ -101,7 +102,7 @@ static ferr_t frsync_ijob_do(frsync_ijob_t *i_job, fistream_t *pistream)
             memmove(i_job->in_buf, i_job->in_buf + i_job->in_size - buf.avail_in, buf.avail_in);
         i_job->in_size = buf.avail_in;
     }
-    while (rsize);
+    while (result == RS_BLOCKED);
 
     return FSUCCESS;
 }

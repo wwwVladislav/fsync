@@ -9,6 +9,9 @@
 
 #include <time.h>
 
+// Global data
+static fmsgbus_t *msgbus = 0;
+
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // rsync test
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -201,10 +204,7 @@ static void fristream_agent(void *ptr, fistream_t *pstream, frstream_info_t cons
 FTEST_START(frstream)
 {
     ferr_t rc;
-    fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-
-    assert(fmsgbus_create(&msgbus, 4) == FSUCCESS);
 
     frstream_factory_t *rstream_factory = frstream_factory(msgbus, &uuid);
     assert(rstream_factory != 0);
@@ -231,17 +231,12 @@ FTEST_START(frstream)
         if (postream) postream->release(postream);
         frstream_factory_release(rstream_factory);
     }
-
-    fmsgbus_release(msgbus);
 }
 FTEST_END()
 
 FTEST_START(frstream_fail)
 {
-    fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-
-    assert(fmsgbus_create(&msgbus, 4) == FSUCCESS);
 
     frstream_factory_t *rstream_factory = frstream_factory(msgbus, &uuid);
     assert(rstream_factory != 0);
@@ -255,8 +250,6 @@ FTEST_START(frstream_fail)
 
         frstream_factory_release(rstream_factory);
     }
-
-    fmsgbus_release(msgbus);
 }
 FTEST_END()
 
@@ -304,9 +297,7 @@ FTEST_START(fsync_engine)
 
     fistream_t *src_istream = fmem_const_istream(FDATA, sizeof FDATA);                      assert(src_istream);
 
-    fmsgbus_t *msgbus = 0;
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-    assert(fmsgbus_create(&msgbus, 4) == FSUCCESS);
 
     fsync_engine_t *psync_engine = fsync_engine(msgbus, &uuid);                             assert(psync_engine);
     if (psync_engine)
@@ -330,14 +321,18 @@ FTEST_START(fsync_engine)
         fsync_engine_release(psync_engine);
     }
 
-    fmsgbus_release(msgbus);
     src_istream->release(src_istream);
 }
 FTEST_END()
 
 FUNIT_TEST_START(fsync)
+    assert(fmsgbus_create(&msgbus, 4) == FSUCCESS);
+
     FTEST(frsync_algorithm);
     FTEST(frstream);
     FTEST(frstream_fail);
     FTEST(fsync_engine);
+
+    fmsgbus_release(msgbus);
+
 FUNIT_TEST_END()

@@ -12,11 +12,11 @@
 
 /*
  *          rstream
- *  src  -- FSTREAM ----------------------------> dst    mandatory
- *      <-- FSTREAM_ACCEPT / REJECT / FAILED ---         mandatory
+ *  src  -- FSTREAM ----------------------------> dst    mandatory  +
+ *      <-- FSTREAM_ACCEPT / FAILED ------------         mandatory
  *      <-- FSTREAM_FAILED --------------------->        optional
- *      <-- FSTREAM_CLOSED --------------------->        optional
  *       -- FSTREAM_DATA ----------------------->        optional
+ *      <-- FSTREAM_CLOSED / FAILED ------------>        mandatory
 */
 
 static struct timespec const F1_MSEC = { 0, 1000000 };
@@ -34,6 +34,7 @@ typedef struct
     uint32_t                    id;             // stream id
     volatile uint64_t           read_size;      // read size
     volatile uint64_t           written_size;   // written size
+    volatile uint64_t           total_size;     // total size transmitted by peer (valid only for closed stream)
     fuuid_t                     src;            // source address
     fuuid_t                     dst;            // destination address
     fmsgbus_t                  *msgbus;         // Messages bus
@@ -47,7 +48,8 @@ static fristream_t     *fristream_retain (fristream_t *pstream);
 static bool             fristream_release(fristream_t *pstream);
 static size_t           fristream_read   (fristream_t *pstream, char *data, size_t size);
 static void             fristream_close  (fristream_t *pstream);
-static fstream_status_t fristream_status(fristream_t *pstream);
+static fstream_status_t fristream_status (fristream_t *pstream);
+static void             fristream_fail   (fristream_t *pstream, ferr_t err, char const *err_msg);
 
 static void fristream_data_handler(fristream_t *pstream, FMSG_TYPE(stream_data) const *msg)
 {
@@ -59,14 +61,11 @@ static void fristream_data_handler(fristream_t *pstream, FMSG_TYPE(stream_data) 
         return;
 
     int i = 0;
-    for(; msg->offset != pstream->written_size && i < FSTREAM_DATA_WAIT_ATTEMPTS; ++i)
+    for(; msg->offset != pstream->written_size && i < FSTREAM_DATA_WAIT_ATTEMPTS; ++i)  // check data blocks order
         nanosleep(&F100_MSEC, NULL);
 
     if (i >= FSTREAM_DATA_WAIT_ATTEMPTS)
-    {
-        fristream_close(pstream);
-        FS_ERR("Istream was closed. Data block wait timeout expired.");
-    }
+        fristream_fail(pstream, FFAIL, "Istream was closed. Data block wait timeout expired.");
     else
     {
         size_t size = 0;
@@ -89,15 +88,6 @@ static void fristream_data_handler(fristream_t *pstream, FMSG_TYPE(stream_data) 
     }
 }
 
-void fristream_reject_handler(fristream_t *pstream, FMSG_TYPE(stream_reject) const *msg)
-{
-    if (msg->stream_id != pstream->id
-        || memcmp(&msg->hdr.src, &pstream->src, sizeof pstream->src) != 0)
-        return;
-    pstream->status = FSTREAM_STATUS_CLOSED;
-    sem_post(&pstream->pin_sem);
-}
-
 void fristream_failed_handler(fristream_t *pstream, FMSG_TYPE(stream_failed) const *msg)
 {
     if (msg->stream_id != pstream->id
@@ -112,6 +102,7 @@ void fristream_closed_handler(fristream_t *pstream, FMSG_TYPE(stream_closed) con
     if (msg->stream_id != pstream->id
         || memcmp(&msg->hdr.src, &pstream->src, sizeof pstream->src) != 0)
         return;
+    pstream->total_size = msg->data_size;
     pstream->status = FSTREAM_STATUS_CLOSED;
     sem_post(&pstream->pin_sem);
 }
@@ -128,7 +119,6 @@ static void fristream_msgbus_retain(fristream_t *pstream, fmsgbus_t *pmsgbus)
 {
     pstream->msgbus = fmsgbus_retain(pmsgbus);
     fmsgbus_subscribe(pmsgbus, FSTREAM_DATA,       (fmsg_handler_t)fristream_data_handler, pstream);
-    fmsgbus_subscribe(pmsgbus, FSTREAM_REJECT,     (fmsg_handler_t)fristream_reject_handler,            pstream);
     fmsgbus_subscribe(pmsgbus, FSTREAM_FAILED,     (fmsg_handler_t)fristream_failed_handler,            pstream);
     fmsgbus_subscribe(pmsgbus, FSTREAM_CLOSED,     (fmsg_handler_t)fristream_closed_handler,            pstream);
     fmsgbus_subscribe(pmsgbus, FNODE_DISCONNECTED, (fmsg_handler_t)fristream_node_disconnected_handler, pstream);
@@ -137,7 +127,6 @@ static void fristream_msgbus_retain(fristream_t *pstream, fmsgbus_t *pmsgbus)
 static void fristream_msgbus_release(fristream_t *pstream)
 {
     fmsgbus_unsubscribe(pstream->msgbus, FSTREAM_DATA,       (fmsg_handler_t)fristream_data_handler);
-    fmsgbus_unsubscribe(pstream->msgbus, FSTREAM_REJECT,     (fmsg_handler_t)fristream_reject_handler);
     fmsgbus_unsubscribe(pstream->msgbus, FSTREAM_FAILED,     (fmsg_handler_t)fristream_failed_handler);
     fmsgbus_unsubscribe(pstream->msgbus, FSTREAM_CLOSED,     (fmsg_handler_t)fristream_closed_handler);
     fmsgbus_unsubscribe(pstream->msgbus, FNODE_DISCONNECTED, (fmsg_handler_t)fristream_node_disconnected_handler);
@@ -243,16 +232,46 @@ static bool fristream_release(fristream_t *pstream)
 
 static void fristream_close(fristream_t *pstream)
 {
-    pstream->status = FSTREAM_STATUS_CLOSED;
-    sem_post(&pstream->pin_sem);
-    if (pstream->msgbus)
+    if (pstream->status != FSTREAM_STATUS_CLOSED
+        && pstream->status != FSTREAM_STATUS_INVALID)
     {
-        FMSG(stream_closed, closed, pstream->dst, pstream->src,
-            pstream->id
-        );
-        if (fmsgbus_publish(pstream->msgbus, FSTREAM_CLOSED, (fmsg_t const *)&closed) != FSUCCESS)
-            FS_ERR("Unable to publish stream close message");
-        fristream_msgbus_release(pstream);
+        pstream->status = FSTREAM_STATUS_CLOSED;
+        sem_post(&pstream->pin_sem);
+
+        if (pstream->msgbus)
+        {
+            FMSG(stream_closed, closed, pstream->dst, pstream->src,
+                pstream->id,
+                pstream->read_size
+            );
+            if (fmsgbus_publish(pstream->msgbus, FSTREAM_CLOSED, (fmsg_t const *)&closed) != FSUCCESS)
+                FS_ERR("Unable to publish stream close message");
+            fristream_msgbus_release(pstream);
+        }
+    }
+}
+
+static void fristream_fail(fristream_t *pstream, ferr_t err, char const *err_msg)
+{
+    if (pstream->status != FSTREAM_STATUS_CLOSED
+        && pstream->status != FSTREAM_STATUS_INVALID)
+    {
+        pstream->status = FSTREAM_STATUS_INVALID;
+        sem_post(&pstream->pin_sem);
+
+        FS_ERR(err_msg);
+
+        if (pstream->msgbus)
+        {
+            FMSG(stream_failed, fail, pstream->dst, pstream->src,
+                pstream->id,
+                pstream->read_size
+            );
+            strncpy(fail.msg, err_msg, sizeof fail.msg);
+            if (fmsgbus_publish(pstream->msgbus, FSTREAM_FAILED, (fmsg_t const *)&fail) != FSUCCESS)
+                FS_ERR("Unable to publish error message");
+            fristream_msgbus_release(pstream);
+        }
     }
 }
 
@@ -265,6 +284,8 @@ static size_t fristream_read(fristream_t *pstream, char *data, size_t size)
     }
 
     if (!data || !size)
+        return 0;
+    if (fristream_status(pstream) != FSTREAM_STATUS_OK)
         return 0;
 
     size_t read_size = 0;
@@ -301,6 +322,8 @@ static fstream_status_t fristream_status(fristream_t *pstream)
         FS_ERR("Invalid arguments");
         return FSTREAM_STATUS_INVALID;
     }
+    if (pstream->status == FSTREAM_STATUS_CLOSED)
+        return pstream->read_size < pstream->total_size ? FSTREAM_STATUS_OK : FSTREAM_STATUS_EOF;
     return pstream->status;
 }
 
@@ -325,6 +348,7 @@ static bool             frostream_release(frostream_t *pstream);
 static size_t           frostream_write  (frostream_t *pstream, char const *data, size_t const size);
 static fstream_status_t frostream_status (frostream_t *pstream);
 static void             frostream_close  (frostream_t *pstream);
+static void             frostream_fail   (frostream_t *pstream, ferr_t err, char const *err_msg);
 
 void frostream_accept_handler(frostream_t *pstream, FMSG_TYPE(stream_accept) const *msg)
 {
@@ -332,15 +356,6 @@ void frostream_accept_handler(frostream_t *pstream, FMSG_TYPE(stream_accept) con
         || memcmp(&msg->hdr.src, &pstream->dst, sizeof pstream->dst) != 0)
         return;
     pstream->status = FSTREAM_STATUS_OK;
-    sem_post(&pstream->sem);
-}
-
-void frostream_reject_handler(frostream_t *pstream, FMSG_TYPE(stream_reject) const *msg)
-{
-    if (msg->stream_id != pstream->id
-        || memcmp(&msg->hdr.src, &pstream->dst, sizeof pstream->dst) != 0)
-        return;
-    pstream->status = FSTREAM_STATUS_CLOSED;
     sem_post(&pstream->sem);
 }
 
@@ -374,7 +389,6 @@ static void frostream_msgbus_retain(frostream_t *pstream, fmsgbus_t *pmsgbus)
 {
     pstream->msgbus = fmsgbus_retain(pmsgbus);
     fmsgbus_subscribe(pmsgbus, FSTREAM_ACCEPT,     (fmsg_handler_t)frostream_accept_handler,            pstream);
-    fmsgbus_subscribe(pmsgbus, FSTREAM_REJECT,     (fmsg_handler_t)frostream_reject_handler,            pstream);
     fmsgbus_subscribe(pmsgbus, FSTREAM_FAILED,     (fmsg_handler_t)frostream_failed_handler,            pstream);
     fmsgbus_subscribe(pmsgbus, FSTREAM_CLOSED,     (fmsg_handler_t)frostream_closed_handler,            pstream);
     fmsgbus_subscribe(pmsgbus, FNODE_DISCONNECTED, (fmsg_handler_t)frostream_node_disconnected_handler, pstream);
@@ -383,7 +397,6 @@ static void frostream_msgbus_retain(frostream_t *pstream, fmsgbus_t *pmsgbus)
 static void frostream_msgbus_release(frostream_t *pstream)
 {
     fmsgbus_unsubscribe(pstream->msgbus, FSTREAM_ACCEPT,     (fmsg_handler_t)frostream_accept_handler);
-    fmsgbus_unsubscribe(pstream->msgbus, FSTREAM_REJECT,     (fmsg_handler_t)frostream_reject_handler);
     fmsgbus_unsubscribe(pstream->msgbus, FSTREAM_FAILED,     (fmsg_handler_t)frostream_failed_handler);
     fmsgbus_unsubscribe(pstream->msgbus, FSTREAM_CLOSED,     (fmsg_handler_t)frostream_closed_handler);
     fmsgbus_unsubscribe(pstream->msgbus, FNODE_DISCONNECTED, (fmsg_handler_t)frostream_node_disconnected_handler);
@@ -457,17 +470,46 @@ static bool frostream_release(frostream_t *pstream)
 
 static void frostream_close(frostream_t *pstream)
 {
-    pstream->status = FSTREAM_STATUS_CLOSED;
-    sem_post(&pstream->sem);
-
-    if (pstream->msgbus)
+    if (pstream->status != FSTREAM_STATUS_CLOSED
+        && pstream->status != FSTREAM_STATUS_INVALID)
     {
-        FMSG(stream_closed, closed, pstream->src, pstream->dst,
-            pstream->id
-        );
-        if (fmsgbus_publish(pstream->msgbus, FSTREAM_CLOSED, (fmsg_t const *)&closed) != FSUCCESS)
-            FS_ERR("Unable to publish stream close message");
-        frostream_msgbus_release(pstream);
+        pstream->status = FSTREAM_STATUS_CLOSED;
+        sem_post(&pstream->sem);
+
+        if (pstream->msgbus)
+        {
+            FMSG(stream_closed, closed, pstream->src, pstream->dst,
+                pstream->id,
+                pstream->written_size
+            );
+            if (fmsgbus_publish(pstream->msgbus, FSTREAM_CLOSED, (fmsg_t const *)&closed) != FSUCCESS)
+                FS_ERR("Unable to publish stream close message");
+            frostream_msgbus_release(pstream);
+        }
+    }
+}
+
+static void frostream_fail(frostream_t *pstream, ferr_t err, char const *err_msg)
+{
+    if (pstream->status != FSTREAM_STATUS_CLOSED
+        && pstream->status != FSTREAM_STATUS_INVALID)
+    {
+        pstream->status = FSTREAM_STATUS_INVALID;
+        sem_post(&pstream->sem);
+
+        FS_ERR(err_msg);
+
+        if (pstream->msgbus)
+        {
+            FMSG(stream_failed, fail, pstream->src, pstream->dst,
+                pstream->id,
+                err
+            );
+            strncpy(fail.msg, err_msg, sizeof fail.msg);
+            if (fmsgbus_publish(pstream->msgbus, FSTREAM_FAILED, (fmsg_t const *)&fail) != FSUCCESS)
+                FS_ERR("Unable to publish error message");
+            frostream_msgbus_release(pstream);
+        }
     }
 }
 
@@ -511,13 +553,13 @@ static size_t frostream_write(frostream_t *pstream, char const *data, size_t con
                 pstream->written_size,
                 block_size);
 
-        switch(fmsgbus_publish(pstream->msgbus, FSTREAM_DATA, (fmsg_t const *)&req))
+        ferr_t rc = fmsgbus_publish(pstream->msgbus, FSTREAM_DATA, (fmsg_t const *)&req);
+        switch(rc)
         {
             case FSUCCESS:
                 break;
             default:
-                FS_ERR("Unable to write ostream data");
-                frostream_close(pstream);
+                frostream_fail(pstream, rc, "Unable to write ostream data");
                 return 0;
         }
 
@@ -696,10 +738,12 @@ static ferr_t frstream_factory_stream_msg_handler(frstream_factory_t *pfactory, 
     char str[2 * sizeof(fuuid_t) + 1] = { 0 };
     FS_ERR("Input stream wasn't accepted. There is no stream subscribers. Source: %s", fuuid2str(&msg->source, str, sizeof str));
 
-    FMSG(stream_reject, reject, pfactory->uuid, msg->source,
-        msg->stream_id
+    FMSG(stream_failed, fail, pfactory->uuid, msg->source,
+        msg->stream_id,
+        FFAIL,
+        "Input stream wasn't accepted"
     );
-    if (fmsgbus_publish(pfactory->msgbus, FSTREAM_REJECT, (fmsg_t const *)&reject) != FSUCCESS)
+    if (fmsgbus_publish(pfactory->msgbus, FSTREAM_FAILED, (fmsg_t const *)&fail) != FSUCCESS)
         FS_ERR("Unable to publish error message");
 
     return FFAIL;

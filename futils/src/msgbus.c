@@ -1,6 +1,8 @@
 #include "msgbus.h"
 #include "queue.h"
 #include "mutex.h"
+#include "vector.h"
+#include <fcommon/limits.h>
 #include "log.h"
 #include <stdlib.h>
 #include <stddef.h>
@@ -11,6 +13,7 @@
 #include <errno.h>
 
 static struct timespec const F1_MSEC = { 0, 1000000 };
+static struct timespec const F10_MSEC = { 0, 10000000 };
 
 enum
 {
@@ -47,16 +50,21 @@ typedef struct
 
 typedef struct
 {
-    uint32_t        msg_type;
-    pthread_mutex_t mutex;
-    fmsg_handler_t  handler;
-    void           *param;
+    volatile uint32_t   ref_counter;
+    fmsg_handler_t      handler;
+    void               *param;
 } fmsgbus_handler_t;
 
 typedef struct
 {
-    volatile bool   is_active;
-    pthread_t       thread;
+    uint32_t            msg_type;
+    fmsgbus_handler_t  *handler;
+} fmsgbus_msg_handler_t;
+
+typedef struct
+{
+    volatile bool       is_active;
+    pthread_t           thread;
 } fmsgbus_ctrl_thread_t;
 
 typedef struct
@@ -66,26 +74,21 @@ typedef struct
     sem_t               sem;
     volatile uint32_t   msg_type;
     fmsg_t * volatile   msg;
+    fmsgbus_handler_t  *handler;
 } fmsgbus_thread_t;
 
 typedef struct
 {
-    fmsgbus_t      *msgbus;
-    uint32_t        thread_id;
+    fmsgbus_t          *msgbus;
+    uint32_t            thread_id;
 } fmsgbus_thread_param_t;
-
-enum
-{
-    FMSGBUS_MAX_HANDLERS = 256,
-    FMSGBUS_MAX_THREADS  = 16
-};
 
 struct fmsgbus
 {
     volatile uint32_t     ref_counter;
 
     fmsgbus_ctrl_thread_t ctrl_thread;
-    fmsgbus_handler_t     handlers[FMSGBUS_MAX_HANDLERS];
+    fvector_t            *handlers;     // vector of fmsgbus_msg_handler_t
     pthread_mutex_t       messages_mutex;
     sem_t                 messages_sem;
     uint8_t               buf[1024 * 1024];
@@ -95,8 +98,95 @@ struct fmsgbus
     fmsgbus_thread_t      threads[FMSGBUS_MAX_THREADS];
 };
 
+static fmsgbus_handler_t *fmsgbus_handler(fmsg_handler_t fn, void *param)
+{
+    fmsgbus_handler_t *handler = (fmsgbus_handler_t *)malloc(sizeof(fmsgbus_handler_t));
+    if (!handler)
+    {
+        FS_ERR("No free space of memory for new message handler");
+        return 0;
+    }
+
+    handler->ref_counter = 1;
+    handler->handler = fn;
+    handler->param = param;
+
+    return handler;
+}
+
+static fmsgbus_handler_t *fmsgbus_handler_retain(fmsgbus_handler_t *handler)
+{
+    handler->ref_counter++;
+    return handler;
+}
+
+static uint32_t fmsgbus_handler_release(fmsgbus_handler_t *handler)
+{
+    uint32_t rc = --handler->ref_counter;
+    if (!rc)
+    {
+        memset(handler, 0, sizeof(*handler));
+        free(handler);
+    }
+    return rc;
+}
+
+static void fmsgbus_handler_wait_last_ref(fmsgbus_handler_t *handler)
+{
+    while(handler->ref_counter > 1)
+        nanosleep(&F10_MSEC, NULL);
+}
+
+static int fmsgbus_handlers_cmp(fmsgbus_msg_handler_t const *lhs, fmsgbus_msg_handler_t const *rhs)
+{
+    return (int)lhs->msg_type - rhs->msg_type;
+}
+
+static bool fmsgbus_handlers_range(fmsgbus_t *pmsgbus, uint32_t msg_type, size_t *first, size_t *last)
+{
+    fmsgbus_msg_handler_t const key = { msg_type, 0 };
+
+    fmsgbus_msg_handler_t *msg_handler = (fmsgbus_msg_handler_t *)fvector_bsearch(pmsgbus->handlers, &key, (fvector_comparer_t)fmsgbus_handlers_cmp);
+    if(!msg_handler)
+        return false;
+
+    size_t const size = fvector_size(pmsgbus->handlers);
+    size_t const idx = fvector_idx(pmsgbus->handlers, msg_handler);
+
+    *first = 0;
+    *last = size;
+
+    for(size_t i = idx; i < size; ++i)
+    {
+        msg_handler = (fmsgbus_msg_handler_t *)fvector_at(pmsgbus->handlers, i);
+        if (msg_handler->msg_type != msg_type)
+        {
+            *last = i;
+            break;
+        }
+    }
+
+    for(long i = (long)idx - 1; i >= 0; --i)
+    {
+        msg_handler = (fmsgbus_msg_handler_t *)fvector_at(pmsgbus->handlers, i);
+        if (msg_handler->msg_type != msg_type)
+        {
+            *first = i + 1;
+            break;
+        }
+    }
+
+    return true;
+}
+
 static bool fmsgbus_msg_handle(fmsgbus_t *msgbus, uint32_t msg_type, fmsg_t *msg)
 {
+    fmsgbus_msg_handler_t const key = { msg_type, 0 };
+
+    fmsgbus_msg_handler_t *msg_handler = (fmsgbus_msg_handler_t *)fvector_bsearch(msgbus->handlers, &key, (fvector_comparer_t)fmsgbus_handlers_cmp);
+    if(!msg_handler)
+        return false;
+
     for(uint32_t thread_id = 0; thread_id < msgbus->threads_num; ++thread_id)
     {
         fmsgbus_thread_t *thread = &msgbus->threads[thread_id];
@@ -105,6 +195,7 @@ static bool fmsgbus_msg_handle(fmsgbus_t *msgbus, uint32_t msg_type, fmsg_t *msg
         {
             thread->msg_type = msg_type;
             thread->msg      = msg;
+            thread->handler  = fmsgbus_handler_retain(msg_handler->handler);
             sem_post(&thread->sem);
             return true;
         }
@@ -113,57 +204,52 @@ static bool fmsgbus_msg_handle(fmsgbus_t *msgbus, uint32_t msg_type, fmsg_t *msg
     return false;
 }
 
-static ferr_t fmsgbus_subscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t handler, void *param)
+static ferr_t fmsgbus_subscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t fn, void *param)
 {
-    int i = 0;
+    fmsgbus_handler_t *handler = fmsgbus_handler(fn, param);
+    if(!handler)
+        return FFAIL;
 
-    for(; i < FMSGBUS_MAX_HANDLERS; ++i)
-    {
-        if (!pmsgbus->handlers[i].handler)
-        {
-            fpush_lock(pmsgbus->handlers[i].mutex);
-            pmsgbus->handlers[i].param = param;
-            pmsgbus->handlers[i].handler = handler;
-            pmsgbus->handlers[i].msg_type = msg_type;
-            fpop_lock();
-            break;
-        }
-    }
-
-    if (i >= FMSGBUS_MAX_HANDLERS)
+    fmsgbus_msg_handler_t const msg_handler = { msg_type, handler };
+    if (!fvector_push_back(&pmsgbus->handlers, &msg_handler))
     {
         FS_ERR("No free space in messages handlers table");
+        fmsgbus_handler_release(handler);
         return FFAIL;
     }
+
+    fvector_qsort(pmsgbus->handlers, (fvector_comparer_t)fmsgbus_handlers_cmp);
 
     return FSUCCESS;
 }
 
-static ferr_t fmsgbus_unsubscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t handler)
+static ferr_t fmsgbus_unsubscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t fn)
 {
-    int i = 0;
+    size_t first = 0, last = 0;
 
-    for(; i < FMSGBUS_MAX_HANDLERS; ++i)
-    {
-        if (pmsgbus->handlers[i].handler == handler
-            && pmsgbus->handlers[i].msg_type == msg_type)
-        {
-            fpush_lock(pmsgbus->handlers[i].mutex);
-            pmsgbus->handlers[i].param = 0;
-            pmsgbus->handlers[i].handler = 0;
-            pmsgbus->handlers[i].msg_type = 0;
-            fpop_lock();
-            break;
-        }
-    }
-
-    if (i >= FMSGBUS_MAX_HANDLERS)
+    if (!fmsgbus_handlers_range(pmsgbus, msg_type, &first, &last))
     {
         FS_WARN("Message handler not found in handlers table");
         return FFAIL;
     }
 
-    return FSUCCESS;
+    for(size_t i = first; i < last; ++i)
+    {
+        fmsgbus_msg_handler_t *msg_handler = (fmsgbus_msg_handler_t *)fvector_at(pmsgbus->handlers, i);
+        if (msg_handler->handler->handler == fn)
+        {
+            if (fvector_erase(&pmsgbus->handlers, i))
+            {
+                fmsgbus_handler_wait_last_ref(msg_handler->handler);
+                fmsgbus_handler_release(msg_handler->handler);
+                return FSUCCESS;
+            }
+            FS_ERR("Message handler wasn't removed from handlers table");
+            return FFAIL;
+        }
+    }
+
+    return FFAIL;
 }
 
 static void *fmsgbus_ctrl_thread(void *param)
@@ -247,19 +333,14 @@ static void *fmsgbus_thread(void *param)
         if (!thread->is_active)
             break;
 
-        for(int i = 0; i < FMSGBUS_MAX_HANDLERS; ++i)
-        {
-            fmsgbus_handler_t *handler = &msgbus->handlers[i];
+        fmsgbus_handler_t *handler = thread->handler;
 
-            fpush_lock(handler->mutex);
-            if (handler->msg_type == thread->msg_type
-                && handler->handler)
-                handler->handler(handler->param, thread->msg);
-            fpop_lock();
-        }
+        handler->handler(handler->param, thread->msg);
 
         free(thread->msg);
         thread->msg_type = 0;
+        thread->handler = 0;
+        fmsgbus_handler_release(handler);
         thread->msg = 0;
     }
 
@@ -291,12 +372,17 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus, uint32_t threads_num)
     pmsgbus->messages_mutex = PTHREAD_MUTEX_INITIALIZER;
     pmsgbus->threads_num = threads_num;
 
-    for(int i = 0; i < FMSGBUS_MAX_HANDLERS; ++i)
-        pmsgbus->handlers[i].mutex = PTHREAD_MUTEX_INITIALIZER;
+    pmsgbus->handlers = fvector(sizeof(fmsgbus_msg_handler_t), 0, 0);
+    if (!pmsgbus->handlers)
+    {
+        FS_ERR("MEssages handlers table initialization was failed");
+        fmsgbus_release(pmsgbus);
+        return FFAIL;
+    }
 
     if (sem_init(&pmsgbus->messages_sem, 0, 0) == -1)
     {
-        FS_ERR("The semaphore initialization is failed");
+        FS_ERR("The semaphore initialization was failed");
         fmsgbus_release(pmsgbus);
         return FFAIL;
     }
@@ -327,7 +413,7 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus, uint32_t threads_num)
             return FFAIL;
         }
 
-        static struct timespec const ts = { 1, 0 };
+        static struct timespec const ts = { 0, 10000000 };
         while(!pmsgbus->threads[i].is_active)
             nanosleep(&ts, NULL);
     }
@@ -340,7 +426,7 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus, uint32_t threads_num)
         return FFAIL;
     }
 
-    static struct timespec const ts = { 1, 0 };
+    static struct timespec const ts = { 0, 10000000 };
     while(!pmsgbus->ctrl_thread.is_active)
         nanosleep(&ts, NULL);
 
@@ -366,20 +452,28 @@ void fmsgbus_release(fmsgbus_t *pmsgbus)
             FS_ERR("Invalid message bus");
         else if (!--pmsgbus->ref_counter)
         {
-            pmsgbus->ctrl_thread.is_active = false;
-            sem_post(&pmsgbus->messages_sem);
-            pthread_join(pmsgbus->ctrl_thread.thread, 0);
+            if(pmsgbus->ctrl_thread.is_active)
+            {
+                pmsgbus->ctrl_thread.is_active = false;
+                sem_post(&pmsgbus->messages_sem);
+                pthread_join(pmsgbus->ctrl_thread.thread, 0);
+            }
+
             sem_destroy(&pmsgbus->messages_sem);
 
             for(uint32_t i = 0; i < pmsgbus->threads_num; ++i)
             {
-                pmsgbus->threads[i].is_active = false;
-                sem_post(&pmsgbus->threads[i].sem);
-                pthread_join(pmsgbus->threads[i].thread, 0);
-                sem_destroy(&pmsgbus->threads[i].sem);
+                if(pmsgbus->threads[i].is_active)
+                {
+                    pmsgbus->threads[i].is_active = false;
+                    sem_post(&pmsgbus->threads[i].sem);
+                    pthread_join(pmsgbus->threads[i].thread, 0);
+                    sem_destroy(&pmsgbus->threads[i].sem);
+                }
             }
 
             fring_queue_free(pmsgbus->messages);
+            fvector_release(pmsgbus->handlers);
             free(pmsgbus);
         }
     }

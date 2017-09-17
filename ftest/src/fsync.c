@@ -4,6 +4,7 @@
 #include "../../fsync/src/sync_engine.h"
 #include <futils/stream.h>
 #include <futils/msgbus.h>
+#include <fcommon/limits.h>
 #include <string.h>
 #include <assert.h>
 
@@ -94,7 +95,7 @@ FTEST_START(frsync_algorithm)
 
     fistream_t *base_data_stream = fmem_const_istream(FBASE_DATA, sizeof FBASE_DATA);
     fistream_t *data_stream = fmem_const_istream(FDATA, sizeof FDATA);
-    
+
     fdata_ostream_t new_data_ostream =
     {
         {
@@ -223,7 +224,8 @@ FTEST_START(frstream)
         size_t written = postream->write(postream, FDATA, sizeof FDATA);                    assert(written == sizeof FDATA);
 
         char tmp[sizeof FDATA] = { 0 };
-        size_t read_size = pistream->read(pistream, tmp, sizeof tmp);                       assert(read_size == sizeof tmp);
+        size_t read_size = pistream->read(pistream, tmp, sizeof tmp);
+        assert(read_size == sizeof tmp);
         assert(memcmp(FDATA, tmp, sizeof FDATA) == 0);
 
         rc = frstream_factory_istream_unsubscribe(rstream_factory, fristream_agent);        assert(rc == FSUCCESS);
@@ -267,7 +269,7 @@ static void fsync_agent_release(fsync_agent_t *pagent)
     (void)pagent;
 }
 
-static fostream_t *dst_ostream = 0;
+static bool is_sync_completed = false;
 
 static bool fsync_agent_accept(fsync_agent_t *pagent, binn *metainf, fistream_t **pistream, fostream_t **postream)
 {
@@ -279,17 +281,21 @@ static bool fsync_agent_accept(fsync_agent_t *pagent, binn *metainf, fistream_t 
 
     // dst_ostream
     fmem_iostream_t *pstream = fmem_iostream(256);                                          assert(pstream);
-    *postream = dst_ostream = fmem_ostream(pstream);                                        assert(dst_ostream);
+    *postream = fmem_ostream(pstream);                                                      assert(*postream);
     fmem_iostream_release(pstream);
 
     return true;
 }
 
 static void fsync_agent_error_handler(fsync_agent_t *pagent, binn *metainf, ferr_t err, char const *err_msg)
-{}
+{
+    is_sync_completed = true;
+}
 
 static void fsync_agent_completion_handler(fsync_agent_t *pagent, binn *metainf)
-{}
+{
+    is_sync_completed = true;
+}
 
 FTEST_START(fsync_engine)
 {
@@ -314,8 +320,11 @@ FTEST_START(fsync_engine)
         rc = fsync_engine_register_agent(psync_engine, &agent);                             assert(rc == FSUCCESS);
         rc = fsync_engine_sync(psync_engine, &uuid, 42, 0, src_istream);                    assert(rc == FSUCCESS);
 
-        static struct timespec const F60_SEC = { 60, 0 };
-        nanosleep(&F60_SEC, NULL);
+        while(!is_sync_completed)
+        {
+            static struct timespec const F1_SEC = { 1, 0 };
+            nanosleep(&F1_SEC, NULL);
+        }
 
         // TODO
         fsync_engine_release(psync_engine);
@@ -326,7 +335,7 @@ FTEST_START(fsync_engine)
 FTEST_END()
 
 FUNIT_TEST_START(fsync)
-    assert(fmsgbus_create(&msgbus, 4) == FSUCCESS);
+    assert(fmsgbus_create(&msgbus, FMSGBUS_THREADS_NUM) == FSUCCESS);
 
     FTEST(frsync_algorithm);
     FTEST(frstream);

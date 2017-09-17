@@ -5,6 +5,7 @@ enum
 {
     FMAX_CONNECTIONS_NUM        = 128,      // Maximum allowed connections
     FMSGBUS_THREADS_NUM         = 8,        // Threads number for messages handling
+    FMSGBUS_MAX_THREADS         = 16,       // Maximum allowed threads number for messages handling
     FDATA_SYNC_THREADS_NUM      = 4,        // Threads number for data synchronization
     FMAX_PATH                   = 1024,     // Max file path length
     FMAX_FILENAME               = 260,      // Max file name length

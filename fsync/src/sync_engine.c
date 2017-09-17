@@ -323,7 +323,7 @@ static bool fsync_src_create(fsync_engine_t *pengine, fsync_src_threads_t *src_t
             return false;
         }
 
-        static struct timespec const ts = { 1, 0 };
+        static struct timespec const ts = { 0, 10000000 };
         while(!sync_thread->sync.is_active)
             nanosleep(&ts, NULL);
     }
@@ -717,7 +717,7 @@ static bool fsync_dst_create(fsync_engine_t *pengine, fsync_dst_threads_t *dst_t
             return false;
         }
 
-        static struct timespec const ts = { 1, 0 };
+        static struct timespec const ts = { 0, 10000000 };
         while(!sync_thread->sync.is_active)
             nanosleep(&ts, NULL);
     }

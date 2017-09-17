@@ -21,7 +21,7 @@
 
 static struct timespec const F1_MSEC = { 0, 1000000 };
 static struct timespec const F100_MSEC = { 0, 100000000 };
-static const int FSTREAM_DATA_WAIT_ATTEMPTS = 30;       // 30 * F100_MSEC = 3 seconds
+static const int FSTREAM_DATA_WAIT_ATTEMPTS = 50;       // 50 * F100_MSEC = 5 seconds
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // fristream
@@ -53,25 +53,33 @@ static void             fristream_fail   (fristream_t *pstream, ferr_t err, char
 
 static void fristream_data_handler(fristream_t *pstream, FMSG_TYPE(stream_data) const *msg)
 {
-    if (fristream_status(pstream) != FSTREAM_STATUS_OK)
-        return;
-
     if (msg->stream_id != pstream->id
         || memcmp(&msg->hdr.src, &pstream->src, sizeof pstream->src) != 0)
         return;
+
+    FS_ERR("%p", pthread_self().p);
+
+    if (fristream_status(pstream) != FSTREAM_STATUS_OK)
+        return;
+
+    FS_ERR("offset=%llu, written_size=%llu", msg->offset, pstream->written_size);
 
     int i = 0;
     for(; msg->offset != pstream->written_size && i < FSTREAM_DATA_WAIT_ATTEMPTS; ++i)  // check data blocks order
         nanosleep(&F100_MSEC, NULL);
 
     if (i >= FSTREAM_DATA_WAIT_ATTEMPTS)
+    {
+        FS_ERR("offset=%llu, written_size=%llu", msg->offset, pstream->written_size);
         fristream_fail(pstream, FFAIL, "Istream was closed. Data block wait timeout expired.");
+    }
     else
     {
         size_t size = 0;
 
         fpush_lock(pstream->mutex);
         size = pstream->pout->write(pstream->pout, (char const *)msg->data, msg->size);
+        pstream->written_size += size;
         fpop_lock();
 
         char src_str[2 * sizeof(fuuid_t) + 1] = { 0 };
@@ -83,7 +91,6 @@ static void fristream_data_handler(fristream_t *pstream, FMSG_TYPE(stream_data) 
                 msg->size,
                 size);
 
-        pstream->written_size += size;
         sem_post(&pstream->pin_sem);
     }
 }
@@ -118,7 +125,7 @@ void fristream_node_disconnected_handler(fristream_t *pstream, FMSG_TYPE(node_di
 static void fristream_msgbus_retain(fristream_t *pstream, fmsgbus_t *pmsgbus)
 {
     pstream->msgbus = fmsgbus_retain(pmsgbus);
-    fmsgbus_subscribe(pmsgbus, FSTREAM_DATA,       (fmsg_handler_t)fristream_data_handler, pstream);
+    fmsgbus_subscribe(pmsgbus, FSTREAM_DATA,       (fmsg_handler_t)fristream_data_handler,              pstream);
     fmsgbus_subscribe(pmsgbus, FSTREAM_FAILED,     (fmsg_handler_t)fristream_failed_handler,            pstream);
     fmsgbus_subscribe(pmsgbus, FSTREAM_CLOSED,     (fmsg_handler_t)fristream_closed_handler,            pstream);
     fmsgbus_subscribe(pmsgbus, FNODE_DISCONNECTED, (fmsg_handler_t)fristream_node_disconnected_handler, pstream);
@@ -898,7 +905,7 @@ frstream_factory_t *frstream_factory(fmsgbus_t *pmsgbus, fuuid_t const *uuid)
         return 0;
     }
 
-    static struct timespec const ts = { 1, 0 };
+    static struct timespec const ts = { 0, 10000000 };
     while(!pfactory->ctrl_thread.is_active)
         nanosleep(&ts, NULL);
 

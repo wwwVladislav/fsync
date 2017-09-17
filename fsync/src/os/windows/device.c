@@ -260,7 +260,7 @@ static bool fsdev_init()
         return false;
     }
 
-    static struct timespec const ts = { 1, 0 };
+    static struct timespec const ts = { 0, 10000000 };
     while(!fsdev_unit.is_active)
         nanosleep(&ts, NULL);
 

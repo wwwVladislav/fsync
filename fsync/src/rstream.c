@@ -53,7 +53,7 @@ static void             fristream_fail   (fristream_t *pstream, ferr_t err, char
 
 static void fristream_data_handler(fristream_t *pstream, FMSG_TYPE(stream_data) const *msg)
 {
-    if (pstream->status != FSTREAM_STATUS_OK)
+    if (fristream_status(pstream) != FSTREAM_STATUS_OK)
         return;
 
     if (msg->stream_id != pstream->id

@@ -1044,7 +1044,6 @@ static void fsync_ok_handler(fsync_engine_t *pengine, FMSG_TYPE(sync_ok) const *
     if (memcmp(&msg->hdr.dst, &pengine->uuid, sizeof pengine->uuid) != 0)
         return;
     fsync_src_ok(&pengine->src_threads, msg->sync_id);
-    FS_ERR("Synchronization ok");
 }
 
 static void fsync_engine_istream_listener(fsync_engine_t *pengine, fistream_t *pstream, frstream_info_t const *info)

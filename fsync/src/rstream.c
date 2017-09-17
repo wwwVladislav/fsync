@@ -720,7 +720,7 @@ static ferr_t frstream_factory_stream_msg_handler(frstream_factory_t *pfactory, 
             if (!istream_is_released)
             {
                 char str[2 * sizeof(fuuid_t) + 1] = { 0 };
-                FS_ERR("Input stream was accepted. Source: %s", fuuid2str(&msg->source, str, sizeof str));
+                FS_INFO("Input stream was accepted. Source: %s", fuuid2str(&msg->source, str, sizeof str));
 
                 FMSG(stream_accept, accept, pfactory->uuid, msg->source,
                     msg->stream_id

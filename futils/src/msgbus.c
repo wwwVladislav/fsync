@@ -17,9 +17,7 @@ static struct timespec const F10_MSEC = { 0, 10000000 };
 
 enum
 {
-    FMSGBUS_MSG = 0,
-    FMSGBUS_SUBSCRIBE,
-    FMSGBUS_UNSUBSCRIBE
+    FMSGBUS_MSG = 0
 };
 
 typedef struct
@@ -88,7 +86,10 @@ struct fmsgbus
     volatile uint32_t     ref_counter;
 
     fmsgbus_ctrl_thread_t ctrl_thread;
+
+    pthread_mutex_t       handlers_mutex;
     fvector_t            *handlers;     // vector of fmsgbus_msg_handler_t
+
     pthread_mutex_t       messages_mutex;
     sem_t                 messages_sem;
     uint8_t               buf[1024 * 1024];
@@ -181,75 +182,111 @@ static bool fmsgbus_handlers_range(fmsgbus_t *pmsgbus, uint32_t msg_type, size_t
 
 static bool fmsgbus_msg_handle(fmsgbus_t *msgbus, uint32_t msg_type, fmsg_t *msg)
 {
-    fmsgbus_msg_handler_t const key = { msg_type, 0 };
+    size_t first = 0, last = 0;
 
-    fmsgbus_msg_handler_t *msg_handler = (fmsgbus_msg_handler_t *)fvector_bsearch(msgbus->handlers, &key, (fvector_comparer_t)fmsgbus_handlers_cmp);
-    if(!msg_handler)
-        return false;
+    if (!fmsgbus_handlers_range(msgbus, msg_type, &first, &last))
+        return true;
 
-    for(uint32_t thread_id = 0; thread_id < msgbus->threads_num; ++thread_id)
+    for(size_t i = first; i < last; ++i)
     {
-        fmsgbus_thread_t *thread = &msgbus->threads[thread_id];
-        if (thread->is_active
-            && !thread->msg)
+        fmsgbus_msg_handler_t msg_handler = *(fmsgbus_msg_handler_t *)fvector_at(msgbus->handlers, i);
+
+        for(uint32_t thread_id = 0; thread_id < msgbus->threads_num; ++thread_id)
         {
-            thread->msg_type = msg_type;
-            thread->msg      = msg;
-            thread->handler  = fmsgbus_handler_retain(msg_handler->handler);
-            sem_post(&thread->sem);
-            return true;
+            fmsgbus_thread_t *thread = &msgbus->threads[thread_id];
+            if (thread->is_active
+                && !thread->msg)
+            {
+                thread->msg_type = msg_type;
+                thread->msg      = msg;
+                thread->handler  = fmsgbus_handler_retain(msg_handler.handler);
+                sem_post(&thread->sem);
+                break;
+            }
         }
     }
 
-    return false;
+    return true;
 }
 
 static ferr_t fmsgbus_subscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t fn, void *param)
 {
+    ferr_t ret = FFAIL;
+
     fmsgbus_handler_t *handler = fmsgbus_handler(fn, param);
     if(!handler)
-        return FFAIL;
+        return FERR_NO_MEM;
 
-    fmsgbus_msg_handler_t const msg_handler = { msg_type, handler };
-    if (!fvector_push_back(&pmsgbus->handlers, &msg_handler))
+    fpush_lock(pmsgbus->handlers_mutex);
+
+    do
     {
-        FS_ERR("No free space in messages handlers table");
-        fmsgbus_handler_release(handler);
-        return FFAIL;
+        fmsgbus_msg_handler_t const msg_handler = { msg_type, handler };
+        if (!fvector_push_back(&pmsgbus->handlers, &msg_handler))
+        {
+            FS_ERR("No free space in messages handlers table");
+            fmsgbus_handler_release(handler);
+            break;
+        }
+
+        fvector_qsort(pmsgbus->handlers, (fvector_comparer_t)fmsgbus_handlers_cmp);
+
+        ret = FSUCCESS;
     }
+    while(0);
 
-    fvector_qsort(pmsgbus->handlers, (fvector_comparer_t)fmsgbus_handlers_cmp);
+    fpop_lock();
 
-    return FSUCCESS;
+    return ret;
 }
 
 static ferr_t fmsgbus_unsubscribe_impl(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t fn)
 {
-    size_t first = 0, last = 0;
+    ferr_t ret = FSUCCESS;
 
-    if (!fmsgbus_handlers_range(pmsgbus, msg_type, &first, &last))
-    {
-        FS_WARN("Message handler not found in handlers table");
-        return FFAIL;
-    }
+    fmsgbus_handler_t *handler = 0;
 
-    for(size_t i = first; i < last; ++i)
+    fpush_lock(pmsgbus->handlers_mutex);
+
+    do
     {
-        fmsgbus_msg_handler_t *msg_handler = (fmsgbus_msg_handler_t *)fvector_at(pmsgbus->handlers, i);
-        if (msg_handler->handler->handler == fn)
+        size_t first = 0, last = 0;
+
+        if (!fmsgbus_handlers_range(pmsgbus, msg_type, &first, &last))
         {
-            if (fvector_erase(&pmsgbus->handlers, i))
+            FS_WARN("Message handler not found in handlers table");
+            break;
+        }
+
+        for(size_t i = first; i < last; ++i)
+        {
+            fmsgbus_msg_handler_t *msg_handler = (fmsgbus_msg_handler_t *)fvector_at(pmsgbus->handlers, i);
+            if (msg_handler->handler->handler == fn)
             {
-                fmsgbus_handler_wait_last_ref(msg_handler->handler);
-                fmsgbus_handler_release(msg_handler->handler);
-                return FSUCCESS;
+                msg_handler->handler->param = 0;
+                handler = msg_handler->handler;
+
+                if (fvector_erase(&pmsgbus->handlers, i))
+                    break;
+
+                FS_ERR("Message handler wasn't removed from handlers table");
+                handler = 0;
+                ret = FFAIL;
+                break;
             }
-            FS_ERR("Message handler wasn't removed from handlers table");
-            return FFAIL;
         }
     }
+    while(0);
 
-    return FFAIL;
+    fpop_lock();
+
+    if(handler)
+    {
+        fmsgbus_handler_wait_last_ref(handler);
+        fmsgbus_handler_release(handler);
+    }
+
+    return ret;
 }
 
 static void *fmsgbus_ctrl_thread(void *param)
@@ -287,24 +324,6 @@ static void *fmsgbus_ctrl_thread(void *param)
                     break;
                 }
 
-                case FMSGBUS_SUBSCRIBE:
-                {
-                    fmsgbus_msg_subscribe_t *msg = (fmsgbus_msg_subscribe_t *)data;
-                    *msg->ret = fmsgbus_subscribe_impl(msgbus, msg->msg_type, msg->handler, msg->param);
-                    sem_post(msg->sem);
-                    fring_queue_pop_front(msgbus->messages);
-                    break;
-                }
-
-                case FMSGBUS_UNSUBSCRIBE:
-                {
-                    fmsgbus_msg_unsubscribe_t *msg = (fmsgbus_msg_unsubscribe_t *)data;
-                    *msg->ret = fmsgbus_unsubscribe_impl(msgbus, msg->msg_type, msg->handler);
-                    sem_post(msg->sem);
-                    fring_queue_pop_front(msgbus->messages);
-                    break;
-                }
-
                 default:
                 {
                     FS_ERR("Unknown message type");
@@ -337,10 +356,10 @@ static void *fmsgbus_thread(void *param)
 
         handler->handler(handler->param, thread->msg);
 
-        free(thread->msg);
         thread->msg_type = 0;
         thread->handler = 0;
         fmsgbus_handler_release(handler);
+        free(thread->msg);
         thread->msg = 0;
     }
 
@@ -369,6 +388,7 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus, uint32_t threads_num)
     memset(pmsgbus, 0, sizeof(fmsgbus_t));
 
     pmsgbus->ref_counter = 1;
+    pmsgbus->handlers_mutex = PTHREAD_MUTEX_INITIALIZER;
     pmsgbus->messages_mutex = PTHREAD_MUTEX_INITIALIZER;
     pmsgbus->threads_num = threads_num;
 
@@ -413,9 +433,8 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus, uint32_t threads_num)
             return FFAIL;
         }
 
-        static struct timespec const ts = { 0, 10000000 };
         while(!pmsgbus->threads[i].is_active)
-            nanosleep(&ts, NULL);
+            nanosleep(&F10_MSEC, NULL);
     }
 
     int rc = pthread_create(&pmsgbus->ctrl_thread.thread, 0, fmsgbus_ctrl_thread, pmsgbus);
@@ -426,9 +445,8 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus, uint32_t threads_num)
         return FFAIL;
     }
 
-    static struct timespec const ts = { 0, 10000000 };
     while(!pmsgbus->ctrl_thread.is_active)
-        nanosleep(&ts, NULL);
+        nanosleep(&F10_MSEC, NULL);
 
     *ppmsgbus = pmsgbus;
 
@@ -489,46 +507,7 @@ ferr_t fmsgbus_subscribe(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t h
         FS_ERR("Invalid argument");
         return FERR_INVALID_ARG;
     }
-
-    ferr_t ret;
-    sem_t  sem;
-    ferr_t result = FSUCCESS;
-
-    if (sem_init(&sem, 0, 0) == -1)
-    {
-        FS_ERR("The semaphore initialization is failed");
-        return FFAIL;
-    }
-
-    fmsgbus_msg_subscribe_t const msg =
-    {
-        FMSGBUS_SUBSCRIBE,
-        msg_type,
-        handler,
-        param,
-        &sem,
-        &result
-    };
-
-    fpush_lock(pmsgbus->messages_mutex);
-    ret = fring_queue_push_back(pmsgbus->messages, &msg, sizeof msg);
-    fpop_lock();
-
-    if (ret == FSUCCESS)
-    {
-        sem_post(&pmsgbus->messages_sem);
-
-        // Waiting for completion
-        struct timespec tm = { time(0) + 1, 0 };
-        while(pmsgbus->ctrl_thread.is_active && sem_timedwait(&sem, &tm) == -1 && errno == EINTR)
-            continue;       // Restart if interrupted by handler
-
-        ret = result;
-    }
-
-    sem_destroy(&sem);
-
-    return ret;
+    return fmsgbus_subscribe_impl(pmsgbus, msg_type, handler, param);
 }
 
 ferr_t fmsgbus_unsubscribe(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t handler)
@@ -539,45 +518,7 @@ ferr_t fmsgbus_unsubscribe(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_handler_t
         FS_ERR("Invalid argument");
         return FERR_INVALID_ARG;
     }
-
-    ferr_t ret;
-    sem_t  sem;
-    ferr_t result = FSUCCESS;
-
-    if (sem_init(&sem, 0, 0) == -1)
-    {
-        FS_ERR("The semaphore initialization is failed");
-        return FFAIL;
-    }
-
-    fmsgbus_msg_unsubscribe_t const msg =
-    {
-        FMSGBUS_UNSUBSCRIBE,
-        msg_type,
-        handler,
-        &sem,
-        &result
-    };
-
-    fpush_lock(pmsgbus->messages_mutex);
-    ret = fring_queue_push_back(pmsgbus->messages, &msg, sizeof msg);
-    fpop_lock();
-
-    if (ret == FSUCCESS)
-    {
-        sem_post(&pmsgbus->messages_sem);
-
-        // Waiting for completion
-        struct timespec tm = { time(0) + 1, 0 };
-        while(pmsgbus->ctrl_thread.is_active && sem_timedwait(&sem, &tm) == -1 && errno == EINTR)
-            continue;       // Restart if interrupted by handler
-
-        ret = result;
-    }
-
-    sem_destroy(&sem);
-
-    return ret;
+    return fmsgbus_unsubscribe_impl(pmsgbus, msg_type, handler);
 }
 
 ferr_t fmsgbus_publish(fmsgbus_t *pmsgbus, uint32_t msg_type, fmsg_t const *msg)

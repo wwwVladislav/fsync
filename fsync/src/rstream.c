@@ -57,22 +57,15 @@ static void fristream_data_handler(fristream_t *pstream, FMSG_TYPE(stream_data) 
         || memcmp(&msg->hdr.src, &pstream->src, sizeof pstream->src) != 0)
         return;
 
-    FS_ERR("%p", pthread_self().p);
-
     if (fristream_status(pstream) != FSTREAM_STATUS_OK)
         return;
-
-    FS_ERR("offset=%llu, written_size=%llu", msg->offset, pstream->written_size);
 
     int i = 0;
     for(; msg->offset != pstream->written_size && i < FSTREAM_DATA_WAIT_ATTEMPTS; ++i)  // check data blocks order
         nanosleep(&F100_MSEC, NULL);
 
     if (i >= FSTREAM_DATA_WAIT_ATTEMPTS)
-    {
-        FS_ERR("offset=%llu, written_size=%llu", msg->offset, pstream->written_size);
         fristream_fail(pstream, FFAIL, "Istream was closed. Data block wait timeout expired.");
-    }
     else
     {
         size_t size = 0;

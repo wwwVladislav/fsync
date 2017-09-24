@@ -14,6 +14,8 @@
 #include <semaphore.h>
 #include <errno.h>
 
+static struct timespec const F10_MSEC = { 0, 10000000 };
+
 /*
  *               synchronization
  *  src  ------------ DATA ------------------> dst
@@ -323,9 +325,8 @@ static bool fsync_src_create(fsync_engine_t *pengine, fsync_src_threads_t *src_t
             return false;
         }
 
-        static struct timespec const ts = { 0, 10000000 };
         while(!sync_thread->sync.is_active)
-            nanosleep(&ts, NULL);
+            nanosleep(&F10_MSEC, NULL);
     }
 
     return true;
@@ -497,7 +498,7 @@ static void *fsync_src_thread(void *param)
 
             src.delta_ostream->release(src.delta_ostream);
             src.delta_ostream = 0;
-            
+
             FSYNC_CHECK_CANCEL_SATATE();
 
             // VI. Wait completion

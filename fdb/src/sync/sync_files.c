@@ -8,10 +8,10 @@
 #include <stddef.h>
 #include <binn.h>
 
-static char const TBL_SYNC_FILE_INFO[]    = "/sfinfo";
-static char const TBL_SYNC_FILE_PATH_ID[] = "/sfpath->id";
-static char const TBL_SYNC_FILE_ID[]      = "/sfid";
-static char const TBL_SYNC_FILE_STATUS[]  = "/sfstatus";
+static char const TBL_SYNC_FILE_INFO[]    = "/sync/file/info";
+static char const TBL_SYNC_FILE_PATH_ID[] = "/sync/file/path/id";
+static char const TBL_SYNC_FILE_ID[]      = "/sync/file/id";
+static char const TBL_SYNC_FILE_STATUS[]  = "/sync/file/status";
 
 static char const *fdb_tbl_name(fuuid_t const *uuid, char *buf, size_t size, char const *tbl)
 {

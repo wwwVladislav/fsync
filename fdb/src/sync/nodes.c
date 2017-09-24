@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-static char const *TBL_NODES = "nodes";
+static char const *TBL_NODES = "sys/nodes";
 
 static binn * fdb_node_marshal(fdb_node_info_t const *info)
 {

@@ -23,7 +23,6 @@
 #include <unistd.h>
 #include <stdbool.h>
 
-static struct timespec const F1_SEC = { 1, 0 };
 static struct timespec const F10_MSEC = { 0, 10000000 };
 
 enum
@@ -641,7 +640,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t co
     }
 
     while(!psync->is_sync_active)
-        nanosleep(&F1_SEC, NULL);
+        nanosleep(&F10_MSEC, NULL);
 
     rc = pthread_create(&psync->events_queue_processing_thread, 0, fsync_events_queue_processing_thread, (void*)psync);
     if (rc)
@@ -654,7 +653,7 @@ fsync_t *fsync_create(fmsgbus_t *pmsgbus, fdb_t *db, char const *dir, fuuid_t co
     fsync_scan_dir(psync);
 
     while(!psync->is_events_queue_processing_active)
-        nanosleep(&F1_SEC, NULL);
+        nanosleep(&F10_MSEC, NULL);
 
     FMSG(node_status, status, psync->uuid, FUUID( 0 ),
         FSTATUS_R4S_DIRS

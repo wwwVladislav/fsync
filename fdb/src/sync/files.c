@@ -4,7 +4,7 @@
 #include <string.h>
 #include <binn.h>
 
-static char const TBL_FILE_INFO[] = "/finfo";
+static char const TBL_FILE_INFO[] = "/file/info";
 
 struct fdb_files
 {

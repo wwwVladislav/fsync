@@ -7,9 +7,9 @@
 #include <string.h>
 #include <binn.h>
 
-static char const *TBL_DIRS = "id->dir";
-static char const *TBL_DIR_IDS = "dir_ids";
-static char const *TBL_DIR_STATUSES = "dstatus";
+static char const *TBL_DIRS = "sys/id/dir";
+static char const *TBL_DIR_IDS = "sys/dir/id";
+static char const *TBL_DIR_STATUSES = "sys/dir/status";
 
 struct fdb_dirs
 {

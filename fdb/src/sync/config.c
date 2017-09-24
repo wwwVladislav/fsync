@@ -1,7 +1,7 @@
 #include "config.h"
 #include <string.h>
 
-static char const *TBL_CONFIG = "config";
+static char const *TBL_CONFIG = "sys/config";
 static char const *CFG_UUID = "uuid";
 static char const *CFG_ADDRESS = "address";
 static char const *CFG_SYNC_DIR = "dir";

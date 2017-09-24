@@ -140,7 +140,7 @@ void fdb_transaction_abort(fdb_transaction_t *transaction)
 
 bool fdb_map_open(fdb_transaction_t *transaction, char const *name, uint32_t flags, fdb_map_t *pmap)
 {
-    if (!transaction || !name || !pmap)
+    if (!transaction || !pmap)
         return false;
 
     uint32_t mdb_flags = 0;

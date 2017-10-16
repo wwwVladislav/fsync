@@ -7,6 +7,7 @@
 #include <filink/interface.h>
 #include <fsync/fsync.h>
 #include <fsync/search_engine.h>
+#include <fsync/sync_engine.h>
 #include <fdb/sync/config.h>
 #include <fdb/sync/nodes.h>
 #include <fdb/sync/dirs.h>
@@ -27,6 +28,7 @@ struct fcore
     fdb_t            *db;
     filink_t         *ilink;
     fsync_t          *sync;
+    fsync_engine_t   *sync_engine;
     fsearch_engine_t *search_engine;
     fconfig_t         config;
 };
@@ -85,6 +87,13 @@ fcore_t *fcore_start(char const *addr)
         return 0;
     }
 
+    pcore->sync_engine = fsync_engine(pcore->msgbus, &pcore->config.uuid);
+    if (!pcore->sync_engine)
+    {
+        fcore_stop(pcore);
+        return 0;
+    }
+
     pcore->search_engine = fsearch_engine(pcore->msgbus, pcore->db, &pcore->config.uuid);
     if (!pcore->search_engine)
     {
@@ -105,6 +114,7 @@ void fcore_stop(fcore_t *pcore)
         filink_unbind(pcore->ilink);
         filink_release(pcore->ilink);
         fsync_release(pcore->sync);
+        fsync_engine_release(pcore->sync_engine);
         fsearch_engine_release(pcore->search_engine);
         fmsgbus_release(pcore->msgbus);
         fdb_release(pcore->db);

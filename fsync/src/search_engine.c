@@ -217,7 +217,6 @@ fsearch_engine_t *fsearch_engine(fmsgbus_t *pmsgbus, fdb_t *db, fuuid_t const *u
         FS_ERR("No free space of memory");
         return 0;
     }
-
     memset(pengine, 0, sizeof *pengine);
 
     pengine->ref_counter = 1;

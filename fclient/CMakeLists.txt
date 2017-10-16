@@ -23,6 +23,7 @@ include_directories(
     ../filink/include
     ../fcommon/include
     ${LIBRSYNC_INCLUDES}
+    ${BINN_INCLUDES}
 )
 
 add_executable(fclient ${FCLIENT_HEADERS} ${FCLIENT_SOURCES})

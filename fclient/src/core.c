@@ -7,6 +7,7 @@
 #include <filink/interface.h>
 #include <fsync/fsync.h>
 #include <fsync/search_engine.h>
+#include <fsync/search_engine_sync_agent.h>
 #include <fsync/sync_engine.h>
 #include <fdb/sync/config.h>
 #include <fdb/sync/nodes.h>
@@ -32,6 +33,30 @@ struct fcore
     fsearch_engine_t *search_engine;
     fconfig_t         config;
 };
+
+static fsync_engine_t *fsync_engine_create(fmsgbus_t *pmsgbus, fuuid_t const *uuid)
+{
+    fsync_engine_t *sync_engine = fsync_engine(pmsgbus, uuid);
+    if (!sync_engine)
+        return 0;
+
+    fsync_agent_t *search_agent = search_engine_sync_agent();
+    if (!search_agent)
+    {
+        fsync_engine_release(sync_engine);
+        return 0;
+    }
+
+    if (fsync_engine_register_agent(sync_engine, search_agent) != FSUCCESS)
+    {
+        search_agent->release(search_agent);
+        fsync_engine_release(sync_engine);
+        return 0;
+    }
+    search_agent->release(search_agent);
+
+    return sync_engine;
+}
 
 fcore_t *fcore_start(char const *addr)
 {
@@ -87,7 +112,7 @@ fcore_t *fcore_start(char const *addr)
         return 0;
     }
 
-    pcore->sync_engine = fsync_engine(pcore->msgbus, &pcore->config.uuid);
+    pcore->sync_engine = fsync_engine_create(pcore->msgbus, &pcore->config.uuid);
     if (!pcore->sync_engine)
     {
         fcore_stop(pcore);

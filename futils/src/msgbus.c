@@ -12,7 +12,6 @@
 #include <semaphore.h>
 #include <errno.h>
 
-static struct timespec const F1_MSEC = { 0, 1000000 };
 static struct timespec const F10_MSEC = { 0, 10000000 };
 
 typedef struct

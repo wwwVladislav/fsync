@@ -426,7 +426,7 @@ static void *fsync_events_queue_processing_thread(void *param)
     fsync_t *psync = (fsync_t*)param;
     psync->is_events_queue_processing_active = true;
 
-    size_t len = strlen(psync->dir);
+//    size_t len = strlen(psync->dir);
 
     while(psync->is_events_queue_processing_active)
     {
@@ -443,7 +443,7 @@ static void *fsync_events_queue_processing_thread(void *param)
         // Copy data from queue into the list
         if (fring_queue_front(psync->events_queue, (void **)&event, &event_size) == FSUCCESS)
         {
-            time_t const cur_time = time(0);
+//            time_t const cur_time = time(0);
 
             switch(event->action)
             {

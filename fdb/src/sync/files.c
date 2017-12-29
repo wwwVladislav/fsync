@@ -38,6 +38,7 @@ static binn * fdb_file_info_marshal(ffile_info_t const *info)
     return obj;
 }
 
+/* unused
 static bool fdb_file_info_unmarshal(ffile_info_t *info, void const *data)
 {
     if (!info || !data)
@@ -49,6 +50,7 @@ static bool fdb_file_info_unmarshal(ffile_info_t *info, void const *data)
     binn_free(obj);
     return true;
 }
+*/
 
 fdb_files_t *fdb_files(fdb_transaction_t *transaction, fuuid_t const *uuid)
 {

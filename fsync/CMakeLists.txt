@@ -30,6 +30,8 @@ set(FSYNC_SOURCES
     src/os/windows/device.c
 )
 
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
 find_package(LIBRSYNC REQUIRED)
 
 message(STATUS "LIBRSYNC_INCLUDES = ${LIBRSYNC_INCLUDES}")
@@ -50,4 +52,4 @@ endif ()
 
 add_library(fsync SHARED ${FSYNC_HEADERS} ${FSYNC_SOURCES})
 add_dependencies(fsync futils fdb binn)
-target_link_libraries(fsync futils fdb binn ${LIBRSYNC_LIBRARIES})
+target_link_libraries(fsync futils fdb binn ${LIBRSYNC_LIBRARIES} Threads::Threads)

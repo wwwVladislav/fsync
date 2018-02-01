@@ -5,6 +5,8 @@
 #include <string.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <errno.h>
+#include <unistd.h>
 
 struct fsdir
 {
@@ -61,7 +63,7 @@ static bool fsseekdir(fsdir_t *pdir, char const *dir_name)
 
     while((ent = readdir(pdir->pdir)))
     {
-        if (dir_name_len == ent->d_namlen
+        if (dir_name_len == strlen(ent->d_name)
             && strncmp(ent->d_name, dir_name, dir_name_len) == 0)
             return true;
     }
@@ -121,16 +123,18 @@ bool fsdir_read(fsdir_t *pdir, dirent_t *pentry)
 
     while((ent = readdir(pdir->pdir)))
     {
+        size_t const dlen = strlen(ent->d_name);
+
         if (ent->d_type == DT_DIR)
         {
-            if ((ent->d_namlen == 1 && !strncmp(ent->d_name, ".", 1))
-                || (ent->d_namlen == 2 && !strncmp(ent->d_name, "..", 2)))
+            if ((dlen == 1 && !strncmp(ent->d_name, ".", 1))
+                || (dlen == 2 && !strncmp(ent->d_name, "..", 2)))
                 continue;
         }
         pentry->type = fsdir_entry_type(ent->d_type);
-        if (ent->d_namlen < sizeof pentry->name)
+        if (dlen < sizeof pentry->name)
         {
-            pentry->namlen = ent->d_namlen;
+            pentry->namlen = dlen;
             pentry->name[pentry->namlen] = 0;
         }
         else

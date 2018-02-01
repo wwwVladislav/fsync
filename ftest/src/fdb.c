@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <assert.h>
 
 FTEST_START(fbd_simple)
 {
@@ -53,7 +52,7 @@ FTEST_START(fbd_simple)
                                     && memcmp(data[i][1].data, value.data, value.size) == 0)
                                     break;
                             }
-                            assert(i < 3);
+                            FTEST_ASSERT(i < 3);
                         }
                         fdb_cursor_close(&cursor);
                     }

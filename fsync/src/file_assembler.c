@@ -56,7 +56,7 @@ file_assembler_t *file_assembler_open(char const *path, uint64_t size)
     uint64_t file_size = 0;
     fsfile_size(tmp_path, &file_size);
 
-    passembler->fd = open(tmp_path, O_CREAT | O_BINARY | O_RDWR, 0777);
+    passembler->fd = open(tmp_path, O_CREAT | /*O_BINARY |*/ O_RDWR, 0777);
     if (passembler->fd == -1)
     {
         file_assembler_close(passembler);

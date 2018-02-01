@@ -126,7 +126,7 @@ FTEST_START(frsync_algorithm)
     {
         rc = frsync_signature_calculate(psig_calc,
                                         base_data_stream,
-                                        (fostream_t*)&signature_ostream);               assert(rc == FSUCCESS);
+                                        (fostream_t*)&signature_ostream);               FTEST_ASSERT(rc == FSUCCESS);
         frsync_signature_calculator_release(psig_calc);
     }
 
@@ -145,10 +145,10 @@ FTEST_START(frsync_algorithm)
     // Signature load
     fistream_t *signature_istream = fmem_const_istream((char const *)signature_ostream.data, signature_ostream.size);
 
-    frsync_signature_t *psig = frsync_signature_create();                               assert(psig);
+    frsync_signature_t *psig = frsync_signature_create();                               FTEST_ASSERT(psig);
     if (psig)
     {
-        rc = frsync_signature_load(psig, signature_istream);                            assert(rc == FSUCCESS);
+        rc = frsync_signature_load(psig, signature_istream);                            FTEST_ASSERT(rc == FSUCCESS);
         if (rc == FSUCCESS)
         {
             // Delta calculation
@@ -157,7 +157,7 @@ FTEST_START(frsync_algorithm)
             {
                 rc = frsync_delta_calculate(pdelta_calc,
                                             data_stream,
-                                            (fostream_t*)&delta_ostream);               assert(rc == FSUCCESS);
+                                            (fostream_t*)&delta_ostream);               FTEST_ASSERT(rc == FSUCCESS);
                 if (rc == FSUCCESS)
                 {
                     fistream_t *delta_istream = fmem_const_istream((char const *)delta_ostream.data, delta_ostream.size);
@@ -165,11 +165,11 @@ FTEST_START(frsync_algorithm)
                     // Delta apply
                     base_data_stream->seek(base_data_stream, 0);
                     frsync_delta_t *pdelta = frsync_delta_create(base_data_stream);
-                    if (pdelta)                                                         assert(pdelta);
+                    if (pdelta)                                                         FTEST_ASSERT(pdelta);
                     {
                         rc = frsync_delta_apply(pdelta,
                                                 delta_istream,
-                                                (fostream_t *)&new_data_ostream);       assert(rc == FSUCCESS);
+                                                (fostream_t *)&new_data_ostream);       FTEST_ASSERT(rc == FSUCCESS);
                         frsync_delta_release(pdelta);
                     }
 
@@ -185,8 +185,8 @@ FTEST_START(frsync_algorithm)
     data_stream->release(data_stream);
     base_data_stream->release(base_data_stream);
 
-    assert(new_data_ostream.size == sizeof FDATA);
-    assert(memcmp(new_data_ostream.data, FDATA, sizeof FDATA) == 0);
+    FTEST_ASSERT(new_data_ostream.size == sizeof FDATA);
+    FTEST_ASSERT(memcmp(new_data_ostream.data, FDATA, sizeof FDATA) == 0);
 }
 FTEST_END()
 
@@ -205,15 +205,17 @@ static void fristream_agent(void *ptr, fistream_t *pstream, frstream_info_t cons
 FTEST_START(frstream)
 {
     ferr_t rc;
+    (void)rc;
+
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 
     frstream_factory_t *rstream_factory = frstream_factory(msgbus, &uuid);
-    assert(rstream_factory != 0);
+    FTEST_ASSERT(rstream_factory != 0);
 
     if (rstream_factory)
     {
-        rc = frstream_factory_istream_subscribe(rstream_factory, fristream_agent, 0);       assert(rc == FSUCCESS);
-        postream = frstream_factory_stream(rstream_factory, &uuid, 0);                      assert(postream != 0);
+        rc = frstream_factory_istream_subscribe(rstream_factory, fristream_agent, 0);       FTEST_ASSERT(rc == FSUCCESS);
+        postream = frstream_factory_stream(rstream_factory, &uuid, 0);                      FTEST_ASSERT(postream != 0);
 
         while (!postream || !pistream)
         {
@@ -221,14 +223,16 @@ FTEST_START(frstream)
             nanosleep(&F1_SEC, NULL);
         }
 
-        size_t written = postream->write(postream, FDATA, sizeof FDATA);                    assert(written == sizeof FDATA);
+        size_t written = postream->write(postream, FDATA, sizeof FDATA);                    FTEST_ASSERT(written == sizeof FDATA);
+        (void)written;
 
         char tmp[sizeof FDATA] = { 0 };
         size_t read_size = pistream->read(pistream, tmp, sizeof tmp);
-        assert(read_size == sizeof tmp);
-        assert(memcmp(FDATA, tmp, sizeof FDATA) == 0);
+        FTEST_ASSERT(read_size == sizeof tmp);
+        FTEST_ASSERT(memcmp(FDATA, tmp, sizeof FDATA) == 0);
+        (void)read_size;
 
-        rc = frstream_factory_istream_unsubscribe(rstream_factory, fristream_agent);        assert(rc == FSUCCESS);
+        rc = frstream_factory_istream_unsubscribe(rstream_factory, fristream_agent);        FTEST_ASSERT(rc == FSUCCESS);
         if (pistream) pistream->release(pistream);
         if (postream) postream->release(postream);
         frstream_factory_release(rstream_factory);
@@ -241,11 +245,12 @@ FTEST_START(frstream_fail)
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 
     frstream_factory_t *rstream_factory = frstream_factory(msgbus, &uuid);
-    assert(rstream_factory != 0);
+    FTEST_ASSERT(rstream_factory != 0);
 
     if (rstream_factory)
     {
-        fostream_t *pstream = frstream_factory_stream(rstream_factory, &uuid, 0);           assert(pstream == 0);
+        fostream_t *pstream = frstream_factory_stream(rstream_factory, &uuid, 0);           FTEST_ASSERT(pstream == 0);
+        (void)pstream;
 
         static struct timespec const F1_SEC = { 1, 0 };
         nanosleep(&F1_SEC, NULL);
@@ -300,12 +305,13 @@ static void fsync_agent_completion_handler(fsync_agent_t *pagent, binn *metainf)
 FTEST_START(fsync_engine)
 {
     ferr_t rc;
+    (void)rc;
 
-    fistream_t *src_istream = fmem_const_istream(FDATA, sizeof FDATA);                      assert(src_istream);
+    fistream_t *src_istream = fmem_const_istream(FDATA, sizeof FDATA);                      FTEST_ASSERT(src_istream);
 
     static fuuid_t const uuid = FUUID(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 
-    fsync_engine_t *psync_engine = fsync_engine(msgbus, &uuid);                             assert(psync_engine);
+    fsync_engine_t *psync_engine = fsync_engine(msgbus, &uuid);                             FTEST_ASSERT(psync_engine);
     if (psync_engine)
     {
         fsync_agent_t agent =
@@ -317,8 +323,8 @@ FTEST_START(fsync_engine)
             fsync_agent_error_handler,
             fsync_agent_completion_handler
         };
-        rc = fsync_engine_register_agent(psync_engine, &agent);                             assert(rc == FSUCCESS);
-        rc = fsync_engine_sync(psync_engine, &uuid, 42, 0, src_istream);                    assert(rc == FSUCCESS);
+        rc = fsync_engine_register_agent(psync_engine, &agent);                             FTEST_ASSERT(rc == FSUCCESS);
+        rc = fsync_engine_sync(psync_engine, &uuid, 42, 0, src_istream);                    FTEST_ASSERT(rc == FSUCCESS);
 
         while(!is_sync_completed)
         {

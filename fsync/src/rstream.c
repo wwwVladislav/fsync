@@ -164,7 +164,8 @@ static fristream_t *fristream(fmsgbus_t *msgbus, uint32_t id, fuuid_t const *src
 
     fristream_msgbus_retain(pstream, msgbus);
 
-    pstream->mutex = PTHREAD_MUTEX_INITIALIZER;
+    static const pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
+    pstream->mutex = mutex_initializer;
 
     fmem_iostream_t *memstream = fmem_iostream(FMEM_BLOCK_SIZE);
     if (!memstream)
@@ -872,9 +873,11 @@ frstream_factory_t *frstream_factory(fmsgbus_t *pmsgbus, fuuid_t const *uuid)
     }
     memset(pfactory, 0, sizeof *pfactory);
 
+    static const pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
+
     pfactory->ref_counter = 1;
     pfactory->uuid = *uuid;
-    pfactory->messages_mutex = PTHREAD_MUTEX_INITIALIZER;
+    pfactory->messages_mutex = mutex_initializer;
 
     if (sem_init(&pfactory->messages_sem, 0, 0) == -1)
     {

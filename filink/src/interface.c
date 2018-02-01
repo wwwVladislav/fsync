@@ -10,7 +10,10 @@
 #include <string.h>
 #include <pthread.h>
 #include <stddef.h>
+
+#ifdef _WIN32
 #include <winsock2.h>
+#endif
 
 typedef struct
 {
@@ -450,7 +453,8 @@ filink_t *filink_bind(fmsgbus_t *pmsgbus, fdb_t *db, char const *addr, fuuid_t c
 
     ilink->nodes_num = 0;
 
-    ilink->nodes_mutex = PTHREAD_MUTEX_INITIALIZER;
+    static const pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
+    ilink->nodes_mutex = mutex_initializer;
 
     int rc = pthread_create(&ilink->thread, 0, filink_thread, (void*)ilink);
     if (rc)

@@ -25,7 +25,7 @@ if (NOT LIBRSYNC_FOUND)
     )
 
     # Find the library
-    find_library (LIBRSYNC_LIBRARIES librsync
+    find_library (LIBRSYNC_LIBRARIES rsync
         HINTS ${LIBRSYNC_ROOT_DIR}
         PATH_SUFFIXES lib
     )

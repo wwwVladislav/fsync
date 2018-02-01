@@ -1,5 +1,4 @@
 #include "test.h"
-#include <conio.h>
 
 FUNIT(fbd);
 FUNIT(fsync);
@@ -14,7 +13,5 @@ int main(int argc, char **argv)
     FUNIT_TEST(fbd);
     FUNIT_TEST(fsync);
 
-    printf("Press any key...");
-    getch();
     return 0;
 }

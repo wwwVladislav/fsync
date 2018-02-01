@@ -5,6 +5,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <string.h>
 
 struct fnet_tcp_client
 {

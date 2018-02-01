@@ -36,7 +36,7 @@ set(FUTILS_LIBS
     ${OPENSSL_LIBRARIES}
 )
 
-if (WIN32)
+if(WIN32)
     set(FUTILS_SOURCES
         ${FUTILS_SOURCES}
         src/os/windows/uuid.c
@@ -47,7 +47,13 @@ if (WIN32)
         ${FUTILS_LIBS}
         ws2_32
     )
-endif (WIN32)
+else()
+    set(FUTILS_SOURCES
+        ${FUTILS_SOURCES}
+        src/os/linux/uuid.c
+        src/os/linux/fs.c
+    )
+endif(WIN32)
 
 include_directories(
     ${OPENSSL_INCLUDE_DIR}
@@ -57,7 +63,7 @@ include_directories(
 use_c99()
 
 if (CMAKE_COMPILER_IS_GNUCXX)
-    add_definitions(-pedantic)
+    add_definitions(-pedantic -fPIC)
 endif ()
 
 add_library(futils STATIC ${FUTILS_HEADERS} ${FUTILS_SOURCES})

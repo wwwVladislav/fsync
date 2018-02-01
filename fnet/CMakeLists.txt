@@ -23,6 +23,12 @@ if (WIN32)
         src/os/windows/socket.c
         src/os/windows/marshaller.c
     )
+else()
+    set(FNET_SOURCES
+        ${FNET_SOURCES}
+        src/os/linux/socket.c
+        src/os/linux/marshaller.c
+    )
 endif (WIN32)
 
 find_package(OpenSSL REQUIRED)
@@ -50,7 +56,7 @@ endif (WIN32)
 use_c99()
 
 if (CMAKE_COMPILER_IS_GNUCXX)
-    add_definitions(-pedantic)
+    add_definitions(-pedantic -fPIC)
 endif ()
 
 add_library(fnet STATIC ${FNET_HEADERS} ${FNET_SOURCES})

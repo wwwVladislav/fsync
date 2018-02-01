@@ -8,7 +8,10 @@
 #include <lmdb.h>
 #include <sys/stat.h>
 #include <errno.h>
+
+#ifdef _WIN32
 #include <io.h>
+#endif
 
 struct fdb
 {
@@ -34,7 +37,11 @@ static bool is_dir_exist(const char *path)
 
 static bool make_dir(const char *path)
 {
+#ifdef _WIN32
     int ret = mkdir(path);
+#else
+        int ret = mkdir(path, 0777);
+#endif
     if (ret == 0)
         return true;
     return errno == EEXIST;

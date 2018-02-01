@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-fslog_level_t log_level = FS_WARNING;
+static fslog_level_t log_level = FS_WARNING;
 
 void fs_log_level_set(fslog_level_t level)
 {

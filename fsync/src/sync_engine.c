@@ -288,7 +288,9 @@ static void *fsync_src_thread(void *);
 
 static bool fsync_src_create(fsync_engine_t *pengine, fsync_src_threads_t *src_threads)
 {
-    src_threads->mutex = PTHREAD_MUTEX_INITIALIZER;
+    static const pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
+
+    src_threads->mutex = mutex_initializer;
 
     src_threads->scrs = fvector(sizeof(fsync_src_t), 0, 0);
     if (!src_threads->scrs)
@@ -681,7 +683,9 @@ static void *fsync_dst_thread(void *);
 
 static bool fsync_dst_create(fsync_engine_t *pengine, fsync_dst_threads_t *dst_threads)
 {
-    dst_threads->mutex = PTHREAD_MUTEX_INITIALIZER;
+    static const pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
+
+    dst_threads->mutex = mutex_initializer;
 
     dst_threads->dsts = fvector(sizeof(fsync_dst_t), 0, 0);
     if (!dst_threads->dsts)
@@ -1165,7 +1169,8 @@ fsync_engine_t *fsync_engine(fmsgbus_t *pmsgbus, fuuid_t const *uuid)
     pengine->uuid = *uuid;
     fsync_engine_msgbus_retain(pengine, pmsgbus);
 
-    pengine->agents_mutex = PTHREAD_MUTEX_INITIALIZER;
+    static const pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
+    pengine->agents_mutex = mutex_initializer;
     pengine->agents = fvector(sizeof(fsync_agent_t*), 0, 0);
     if (!pengine->agents)
     {
@@ -1278,7 +1283,7 @@ ferr_t fsync_engine_sync(fsync_engine_t *pengine, fuuid_t const *dst, uint32_t a
         return FFAIL;
     }
 
-    sem_t sem = 0;
+    sem_t sem;
 
     if (sem_init(&sem, 0, 0) == -1)
     {

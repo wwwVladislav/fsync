@@ -391,9 +391,11 @@ ferr_t fmsgbus_create(fmsgbus_t **ppmsgbus, uint32_t threads_num)
     }
     memset(pmsgbus, 0, sizeof(fmsgbus_t));
 
+    static const pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
+
     pmsgbus->ref_counter = 1;
-    pmsgbus->handlers_mutex = PTHREAD_MUTEX_INITIALIZER;
-    pmsgbus->messages_mutex = PTHREAD_MUTEX_INITIALIZER;
+    pmsgbus->handlers_mutex = mutex_initializer;
+    pmsgbus->messages_mutex = mutex_initializer;
     pmsgbus->threads_num = threads_num;
 
     pmsgbus->handlers = fvector(sizeof(fmsgbus_msg_handler_t), 0, 0);

@@ -25,10 +25,13 @@ set(FSYNC_SOURCES
     src/rstream.c
 )
 
-set(FSYNC_SOURCES
-    ${FSYNC_SOURCES}
-    src/os/windows/device.c
-)
+if (WIN32)
+    set(FSYNC_SOURCES
+        ${FSYNC_SOURCES}
+        src/os/windows/device.c
+    )
+endif (WIN32)
+
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)

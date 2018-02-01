@@ -344,7 +344,7 @@ static void fsync_file_part_request_handler(fsync_t *psync, FMSG_TYPE(file_part_
             {
                 if (fdb_sync_file_path(files_map, &transaction, msg->id, path + len, sizeof path - len))
                 {
-                    int fd = open(path, O_BINARY | O_RDONLY);
+                    int fd = open(path, /*O_BINARY |*/ O_RDONLY);
                     if (fd != -1)
                     {
                         FMSG(file_part, part, psync->uuid, msg->hdr.src,

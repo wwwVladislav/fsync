@@ -3,6 +3,7 @@
 #include <futils/log.h>
 #include <string.h>
 #include <stdio.h>
+#include <netdb.h>
 
 bool fnet_str2addr(char const *str, fnet_address_t *addr)
 {

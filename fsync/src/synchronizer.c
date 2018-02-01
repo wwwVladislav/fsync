@@ -311,7 +311,9 @@ fsynchronizer_t *fsynchronizer_create(fmsgbus_t *pmsgbus, fdb_t *db, fuuid_t con
         return 0;
     }
 
-    psynchronizer->mutex = PTHREAD_MUTEX_INITIALIZER;
+    static const pthread_mutex_t mutex_initializer = PTHREAD_MUTEX_INITIALIZER;
+
+    psynchronizer->mutex = mutex_initializer;
 
     if (!fsynchronizer_update_sync_files_list(psynchronizer))
     {

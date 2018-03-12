@@ -3,7 +3,9 @@
 #include <futils/log.h>
 #include <string.h>
 #include <stdio.h>
+#ifndef _WIN32
 #include <netdb.h>
+#endif
 
 bool fnet_str2addr(char const *str, fnet_address_t *addr)
 {

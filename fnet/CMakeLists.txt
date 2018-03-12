@@ -31,19 +31,18 @@ else()
     )
 endif (WIN32)
 
-find_package(OpenSSL REQUIRED)
-
-message (STATUS "OPENSSL_INCLUDE_DIR = ${OPENSSL_INCLUDE_DIR}")
-
 include_directories(
-    ${OPENSSL_INCLUDE_DIR}
+    ../libs/openssl/include
+    ${CMAKE_BINARY_DIR}/openssl/openssl/ssl
+    ${CMAKE_BINARY_DIR}/openssl/openssl/crypto
     ../futils/include
     ../fcommon/include
 )
 
 set(FNET_LIBS
     futils
-    ${OPENSSL_LIBRARIES}
+    crypto
+    ssl
 )
 
 if (WIN32)
@@ -60,5 +59,5 @@ if (CMAKE_COMPILER_IS_GNUCXX)
 endif ()
 
 add_library(fnet STATIC ${FNET_HEADERS} ${FNET_SOURCES})
-add_dependencies(fnet futils)
+add_dependencies(fnet futils crypto ssl)
 target_link_libraries(fnet ${FNET_LIBS})

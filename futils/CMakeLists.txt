@@ -28,12 +28,9 @@ set(FUTILS_SOURCES
     src/stream.c
 )
 
-find_package(OpenSSL REQUIRED)
-
-message (STATUS "OPENSSL_INCLUDE_DIR = ${OPENSSL_INCLUDE_DIR}")
-
 set(FUTILS_LIBS
-    ${OPENSSL_LIBRARIES}
+    crypto
+    ssl
 )
 
 if(WIN32)
@@ -56,7 +53,9 @@ else()
 endif(WIN32)
 
 include_directories(
-    ${OPENSSL_INCLUDE_DIR}
+    ../libs/openssl/include
+    ${CMAKE_BINARY_DIR}/openssl/openssl/ssl
+    ${CMAKE_BINARY_DIR}/openssl/openssl/crypto
     ../fcommon/include
 )
 
@@ -68,3 +67,4 @@ endif ()
 
 add_library(futils STATIC ${FUTILS_HEADERS} ${FUTILS_SOURCES})
 target_link_libraries(futils ${FUTILS_LIBS})
+add_dependencies(futils crypto ssl)

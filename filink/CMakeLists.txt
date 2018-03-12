@@ -14,22 +14,23 @@ set(FILINK_SOURCES
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-find_package(OpenSSL REQUIRED)
-
-message (STATUS "OPENSSL_INCLUDE_DIR = ${OPENSSL_INCLUDE_DIR}")
-
 include_directories(
     ../fdb/include
     ../fnet/include
     ../futils/include
     ../fcommon/include
+    ../libs/openssl/include
+    ${CMAKE_BINARY_DIR}/openssl/openssl/ssl
+    ${CMAKE_BINARY_DIR}/openssl/openssl/crypto
 )
 
 set(FILINK_LIBS
     futils
     fnet
     Threads::Threads
-    ${OPENSSL_LIBRARIES}
+    fdb
+    crypto
+    ssl
 )
 
 if (WIN32)
@@ -46,5 +47,5 @@ if (CMAKE_COMPILER_IS_GNUCXX)
 endif ()
 
 add_library(filink SHARED ${FILINK_HEADERS} ${FILINK_SOURCES})
-add_dependencies(filink futils fnet fdb)
-target_link_libraries(filink ${FILINK_LIBS} fdb)
+add_dependencies(filink futils fnet fdb crypto ssl)
+target_link_libraries(filink ${FILINK_LIBS})

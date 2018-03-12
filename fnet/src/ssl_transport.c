@@ -76,7 +76,7 @@ static bool fnet_ssl_module_init(fnet_ssl_module_t *pmodule)
             }
 
             SSL_CTX_set_options(pmodule->ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_COMPRESSION);
-            SSL_CTX_set_ecdh_auto(pmodule->ctx, 1);
+            // SSL_CTX_set_ecdh_auto(pmodule->ctx, 1);
             SSL_CTX_set_default_passwd_cb(pmodule->ctx, fnet_pem_password_cb);
             SSL_CTX_set_verify(pmodule->ctx, SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE, 0);
 

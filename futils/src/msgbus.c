@@ -472,14 +472,11 @@ void fmsgbus_release(fmsgbus_t *pmsgbus)
 
             for(uint32_t i = 0; i < pmsgbus->threads_num; ++i)
                 sem_post(&pmsgbus->messages_sem);
-                
+
             for(uint32_t i = 0; i < pmsgbus->threads_num; ++i)
             {
-                if(pmsgbus->threads[i].is_active)
-                {
-                    pthread_join(pmsgbus->threads[i].thread, 0);
-                    fvector_release(pmsgbus->threads[i].retained_handlers);
-                }
+                pthread_join(pmsgbus->threads[i].thread, 0);
+                fvector_release(pmsgbus->threads[i].retained_handlers);
             }
 
             sem_destroy(&pmsgbus->messages_sem);

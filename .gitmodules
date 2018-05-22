@@ -8,3 +8,6 @@
 [submodule "libs/openssl/openssl"]
 	path = libs/openssl/openssl
 	url = https://github.com/pol51/OpenSSL-CMake.git
+[submodule "libs/rsync"]
+	path = libs/rsync
+	url = https://github.com/librsync/librsync.git

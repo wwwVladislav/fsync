@@ -20,10 +20,6 @@ include_directories(
     ../fsync/include
 )
 
-if (CMAKE_COMPILER_IS_GNUCXX)
-    add_definitions(-pedantic)
-endif ()
-
 add_executable(ftest ${FTEST_HEADERS} ${FTEST_SOURCES})
 add_dependencies(ftest fdb futils fsync binn)
 target_link_libraries(ftest fdb futils fsync binn)

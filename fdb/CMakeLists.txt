@@ -28,10 +28,6 @@ use_c99()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-if (CMAKE_COMPILER_IS_GNUCXX)
-    add_definitions(-pedantic)
-endif ()
-
 include_directories(
     ${LIBLMDB_INCLUDES}
     ${BINN_INCLUDES}

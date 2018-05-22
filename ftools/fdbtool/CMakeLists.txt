@@ -10,10 +10,6 @@ set(FDBTOOL_SOURCES
     src/dbtool.c
 )
 
-if (CMAKE_COMPILER_IS_GNUCXX)
-    add_definitions(-pedantic)
-endif ()
-
 include_directories(
     ../../fdb/include
     ../../futils/include

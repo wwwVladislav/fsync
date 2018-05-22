@@ -55,7 +55,7 @@ endif (WIN32)
 use_c99()
 
 if (CMAKE_COMPILER_IS_GNUCXX)
-    add_definitions(-pedantic -fPIC)
+    add_definitions(-fPIC)
 endif ()
 
 add_library(fnet STATIC ${FNET_HEADERS} ${FNET_SOURCES})

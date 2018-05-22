@@ -42,10 +42,6 @@ endif (WIN32)
 
 use_c99()
 
-if (CMAKE_COMPILER_IS_GNUCXX)
-    add_definitions(-pedantic)
-endif ()
-
 add_library(filink SHARED ${FILINK_HEADERS} ${FILINK_SOURCES})
 add_dependencies(filink futils fnet fdb crypto ssl)
 target_link_libraries(filink ${FILINK_LIBS})

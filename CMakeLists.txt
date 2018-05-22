@@ -1,9 +1,12 @@
 # usage:
-# cmake -DCMAKE_BUILD_TYPE=Release CMakeLists.txt
-# cmake -DCMAKE_BUILD_TYPE=Debug CMakeLists.txt
-# cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo CMakeLists.txt
-# cmake -DCMAKE_BUILD_TYPE=MinSizeRel CMakeLists.txt
-# cmake -DCMAKE_BUILD_TYPE=Debug -G "MinGW Makefiles" .
+# mkdir build
+# cd build
+# cmake -DCMAKE_BUILD_TYPE=Release ..
+# cmake -DCMAKE_BUILD_TYPE=Debug ..
+# cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ..
+# cmake -DCMAKE_BUILD_TYPE=MinSizeRel ..
+# cmake -DCMAKE_BUILD_TYPE=Debug -G "MinGW Makefiles" ..
+# make
 
 cmake_minimum_required(VERSION 3.1)
 project(fsync)
@@ -24,12 +27,14 @@ endif()
 #*********************************************************
 # module path
 #*********************************************************
-set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 #*********************************************************
 # output directory
 #*********************************************************
-set(FSYNC_OUTPUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../output)
+if (NOT OUTPUT_DIR)
+    set(OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/output)
+endif()
 
 #*********************************************************
 # BITNESS
@@ -78,9 +83,9 @@ set(CMAKE_RELWITHDEBINFO_POSTFIX    ${FSYNC_RELWITHDEBINFO_POSTFIX})
 #*********************************************************
 # output directories
 #*********************************************************
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${FSYNC_OUTPUT_DIR})
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${FSYNC_OUTPUT_DIR})
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${FSYNC_OUTPUT_DIR})
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${OUTPUT_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${OUTPUT_DIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_DIR})
 
 #*********************************************************
 # useful macros
@@ -99,11 +104,11 @@ add_subdirectory(${CMAKE_MODULE_PATH}/binn      binn)
 add_subdirectory(${CMAKE_MODULE_PATH}/lmdb      lmdb)
 add_subdirectory(${CMAKE_MODULE_PATH}/openssl   openssl)
 add_subdirectory(${CMAKE_MODULE_PATH}/rsync     rsync)
-add_subdirectory(../futils                      futils)
-add_subdirectory(../fdb                         fdb)
-add_subdirectory(../fsync                       fsync)
-add_subdirectory(../fnet                        fnet)
-add_subdirectory(../filink                      filink)
-add_subdirectory(../fclient                     fclient)
-add_subdirectory(../ftest                       ftest)
-add_subdirectory(../ftools/fdbtool              fdbtool)
+add_subdirectory(futils                         futils)
+add_subdirectory(fdb                            fdb)
+add_subdirectory(fsync                          fsync)
+add_subdirectory(fnet                           fnet)
+add_subdirectory(filink                         filink)
+add_subdirectory(fclient                        fclient)
+add_subdirectory(ftest                          ftest)
+add_subdirectory(ftools/fdbtool                 fdbtool)

@@ -30,10 +30,17 @@ endif()
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 #*********************************************************
+# binary directory
+#*********************************************************
+if (NOT BIN_DIR)
+    set(BIN_DIR ${CMAKE_CURRENT_BINARY_DIR})
+endif()
+
+#*********************************************************
 # output directory
 #*********************************************************
 if (NOT OUTPUT_DIR)
-    set(OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/output)
+    set(OUTPUT_DIR ${BIN_DIR}/output)
 endif()
 
 #*********************************************************

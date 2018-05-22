@@ -20,8 +20,8 @@ include_directories(
     ../futils/include
     ../fcommon/include
     ../libs/openssl/include
-    ${CMAKE_BINARY_DIR}/openssl/openssl/ssl
-    ${CMAKE_BINARY_DIR}/openssl/openssl/crypto
+    ${OUTPUT_DIR}/openssl/openssl/ssl
+    ${OUTPUT_DIR}/openssl/openssl/crypto
 )
 
 set(FILINK_LIBS

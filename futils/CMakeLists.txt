@@ -54,8 +54,8 @@ endif(WIN32)
 
 include_directories(
     ../libs/openssl/include
-    ${CMAKE_BINARY_DIR}/openssl/openssl/ssl
-    ${CMAKE_BINARY_DIR}/openssl/openssl/crypto
+    ${OUTPUT_DIR}/openssl/openssl/ssl
+    ${OUTPUT_DIR}/openssl/openssl/crypto
     ../fcommon/include
 )
 
